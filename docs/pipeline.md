@@ -26,7 +26,11 @@ candidates.
 
 - `max_keywords`: maximum keyword rows retained during collection.
 - `max_autocomplete_queries`: maximum expansion queries.
-- `max_ads_calls`: maximum Ads requests, including batches of up to 20 keywords.
+- `max_ads_calls`: maximum Keyword Planner operations. A historical-metrics
+  batch of up to 20 keywords counts as one, and so does a keyword-ideas
+  request, even where Google splits its answer across pages — the provider
+  walks those pages under the shared one-request-per-second limit, so a wide
+  seed costs more time than the counter suggests.
 - `max_trends_calls`: maximum Trends requests.
 - `max_runtime_seconds`: total elapsed runtime ceiling.
 
