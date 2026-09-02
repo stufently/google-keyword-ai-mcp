@@ -59,6 +59,36 @@ def test_auto_scenario_selection_distinguishes_topic_domain_url_and_property(
     anyio.run(exercise)
 
 
+def test_sc_domain_stays_site_research_when_the_property_is_unreachable(
+    settings: Settings,
+) -> None:
+    """`sc-domain:` is a Search Console identifier, not a web address.
+
+    Auto-selection used to fall through to competitor research whenever the
+    property could not be confirmed — no Search Console configured, or the
+    account does not own it. That contradicted the plan the dry run had just
+    shown the user and sent `sc-domain:...` to Google Ads as a site URL.
+    """
+
+    async def exercise() -> None:
+        without_gsc = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget()),
+        )
+        unowned = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget()),
+            search_console=cast(SearchConsoleLike, PropertyOnlyGsc()),
+        )
+        for context in (without_gsc, unowned):
+            selected = await _select_scenario(context, "auto", "sc-domain:example.com", None)
+            assert isinstance(selected, ExistingSiteResearch)
+
+    anyio.run(exercise)
+
+
 def test_explicit_scenario_overrides_auto_and_unknown_is_rejected(settings: Settings) -> None:
     explicit = run_research(settings, "plain topic", scenario="site", dry_run=True)
     assert explicit.data.scenario == "site"

@@ -31,6 +31,28 @@ def _missing[T](run_id: str) -> Envelope[T]:
     )
 
 
+def _stored_diagnostics(
+    record: RunRecord,
+    warnings: list[str],
+    errors: list[str],
+) -> tuple[list[str], list[str]]:
+    """Merge the warnings and errors of a stored envelope into fresh ones.
+
+    Anything the resume itself produced (a stale-version notice, for example)
+    is kept and comes first; the stored entries are appended without
+    duplicates, so a run resumed twice does not grow its own diagnostics.
+    """
+    stored = record.result or {}
+    for key, target in (("warnings", warnings), ("errors", errors)):
+        values = stored.get(key)
+        if not isinstance(values, list):
+            continue
+        for value in values:
+            if isinstance(value, str) and value not in target:
+                target.append(value)
+    return warnings, errors
+
+
 def run_show(settings: Settings, run_id: str) -> Envelope[RunRecord]:
     engine = open_database(settings)
     try:
@@ -78,22 +100,31 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
         market = Market.parse(current.language, current.country)
         cache = SqliteCache(engine, settings)
         async with _live_context(settings, market, current.budget, cache) as context:
-            scenario = _scenario_for_name(current.scenario, current.target, None)
+            scenario = _scenario_for_name(current.scenario, current.target, current.seed_keyword)
             stages = scenario_stages(
                 current.scenario,
                 target=current.target,
                 market=market,
                 budget=current.budget,
+                seed_keyword=current.seed_keyword,
             )
-            data = await RunExecutor(store, scenario, stages).execute(
-                current,
-                context,
-                resume=True,
-            )
+            executor = RunExecutor(store, scenario, stages)
+            data = await executor.execute(current, context, resume=True)
+            if current.limit is not None:
+                data.keywords = data.keywords[: current.limit]
+            warnings = list(context.warnings)
+            errors = list(context.errors)
+            if not executor.replayed:
+                # Nothing was collected: every checkpoint was still valid. The
+                # fresh context therefore knows of no warnings, and rebuilding
+                # the envelope from it would silently promote a stored
+                # `partial` to `complete` and then overwrite the saved result
+                # with that lie. Carry the original diagnostics forward.
+                warnings, errors = _stored_diagnostics(current, warnings, errors)
             envelope = _envelope_for_research(
                 data,
-                context.warnings,
-                context.errors,
+                warnings,
+                errors,
                 run_id=current.run_id,
             )
             refreshed = store.get(current.run_id)
@@ -102,7 +133,7 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
                 current.run_id,
                 status=RunStatus.FAILED if failed else RunStatus.COMPLETED,
                 result=envelope.to_wire(),
-                error=context.errors[0] if failed and context.errors else None,
+                error=errors[0] if failed and errors else None,
             )
             if not failed:
                 store.set_versions(
@@ -141,6 +172,8 @@ def run_rerun(settings: Settings, run_id: str) -> Envelope[ResearchData]:
         language=record.language,
         country=record.country,
         budget=record.budget,
+        seed_keyword=record.seed_keyword,
+        limit=record.limit,
         save_run=True,
     )
     return cast(Envelope[ResearchData], result)

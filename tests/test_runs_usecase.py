@@ -168,6 +168,57 @@ def test_resume_does_not_replay_valid_stages(
     assert resumed.data.keywords[0].keyword == "topic one"
 
 
+def test_resume_of_a_partial_run_keeps_its_warnings_and_stays_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full-reuse resume collects nothing, so it must not relabel the run.
+
+    The executor hands back the checkpoint data and the fresh scenario context
+    is empty, so building the envelope from that context alone reported a
+    stored `partial` as `complete` with no warnings — and then wrote that back
+    over the saved result, destroying the record of what had gone wrong.
+    """
+    settings = Settings(data_dir=tmp_path / "partial-resume")
+    engine = open_database(settings)
+    try:
+        record = _completed_record(settings)
+        record.result = Envelope(
+            data=_data(),
+            warnings=["Google Ads was unavailable."],
+            completeness=Completeness.PARTIAL,
+            completeness_reason="Google Ads was unavailable.",
+        ).to_wire()
+        RunStore(engine).create(record)
+    finally:
+        engine.dispose()
+
+    class NeverRunScenario:
+        async def run(self, context: ScenarioContext) -> ResearchData:
+            del context
+            raise AssertionError("valid stages must not be replayed")
+
+    monkeypatch.setattr(runs_module, "_live_context", _fake_live_context)
+    monkeypatch.setattr(
+        runs_module,
+        "_scenario_for_name",
+        lambda name, target, seed: NeverRunScenario(),
+    )
+    resumed = run_resume(settings, record.run_id)
+
+    assert resumed.completeness is Completeness.PARTIAL
+    assert resumed.warnings == ["Google Ads was unavailable."]
+
+    engine = open_database(settings)
+    try:
+        stored = RunStore(engine).get(record.run_id)
+    finally:
+        engine.dispose()
+    assert stored is not None
+    assert stored.result is not None
+    assert stored.result["completeness"] == Completeness.PARTIAL.value
+    assert stored.result["warnings"] == ["Google Ads was unavailable."]
+
+
 def test_rerun_creates_new_run_id_without_touching_original(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -193,6 +244,163 @@ def test_rerun_creates_new_run_id_without_touching_original(
         assert store.get(rerun.run_id) is not None
     finally:
         engine.dispose()
+
+
+def _competitor_record(settings: Settings, *, seed: str | None, limit: int | None) -> RunRecord:
+    market = Market.parse("en", "US")
+    budget = Budget()
+    stages = scenario_stages(
+        "competitor",
+        target="example.com",
+        market=market,
+        budget=budget,
+        seed_keyword=seed,
+    )
+    data = _data()
+    data.keywords.append(
+        ResearchKeyword(
+            keyword="topic two",
+            normalized="topic two",
+            discovered_from=["autocomplete"],
+        )
+    )
+    now = datetime.now(UTC)
+    return RunRecord(
+        run_id=new_run_id(),
+        scenario="competitor",
+        target="example.com",
+        language="en",
+        country="US",
+        status=RunStatus.COMPLETED,
+        seed_keyword=seed,
+        limit=limit,
+        app_version=__version__,
+        parser_version=PARSER_VERSION,
+        budget=budget,
+        config_snapshot=masked_dump(settings),
+        result=Envelope(data=data).to_wire(),
+        created_at=now,
+        updated_at=now,
+        stages=[
+            StageRecord(
+                name=stage.name,
+                position=stage.position,
+                status=StageStatus.COMPLETED,
+                fingerprint=stage_fingerprint(stage.name, stage.fingerprint_payload),
+                attempts=1,
+                checkpoint=data.model_dump(mode="json"),
+                started_at=now,
+                finished_at=now,
+            )
+            for stage in stages
+        ],
+    )
+
+
+def test_resume_rebuilds_the_scenario_with_the_stored_seed_keyword(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A saved run has to remember the whole request, not just its target.
+
+    `resume` passed `seed_keyword=None`, so a competitor run started with
+    `--seed-keyword` came back as a different scenario: every stage fingerprint
+    was computed without the seed and therefore missed, and the replay ran
+    site-seed research instead of the seeded research that was asked for.
+    """
+    settings = Settings(data_dir=tmp_path / "seeded")
+    engine = open_database(settings)
+    try:
+        record = _competitor_record(settings, seed="running shoes", limit=None)
+        RunStore(engine).create(record)
+    finally:
+        engine.dispose()
+
+    seeds: list[str | None] = []
+    replays: list[int] = []
+
+    class RecordingScenario:
+        async def run(self, context: ScenarioContext) -> ResearchData:
+            del context
+            replays.append(1)
+            return _data()
+
+    def fake_scenario(name: str, target: str, seed: str | None) -> RecordingScenario:
+        seeds.append(seed)
+        return RecordingScenario()
+
+    monkeypatch.setattr(runs_module, "_live_context", _fake_live_context)
+    monkeypatch.setattr(runs_module, "_scenario_for_name", fake_scenario)
+    resumed = run_resume(settings, record.run_id)
+
+    # The seed reaches the scenario itself...
+    assert seeds == ["running shoes"]
+    # ...and the stage fingerprints, which are what decide whether the saved
+    # work still answers the question that was asked. Drop the seed from either
+    # and this run silently becomes a different one.
+    assert replays == []
+    assert resumed.run_id == record.run_id
+    assert resumed.completeness is Completeness.COMPLETE
+
+
+def test_resume_applies_the_stored_result_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--limit` trims the answer after collection, so checkpoints hold it all.
+
+    Without the limit on the record, resuming a run started with `--limit 1`
+    handed back every keyword the checkpoint held.
+    """
+    settings = Settings(data_dir=tmp_path / "limited")
+    engine = open_database(settings)
+    try:
+        record = _competitor_record(settings, seed=None, limit=1)
+        RunStore(engine).create(record)
+    finally:
+        engine.dispose()
+
+    class NeverRunScenario:
+        async def run(self, context: ScenarioContext) -> ResearchData:
+            del context
+            raise AssertionError("valid stages must not be replayed")
+
+    monkeypatch.setattr(runs_module, "_live_context", _fake_live_context)
+    monkeypatch.setattr(
+        runs_module,
+        "_scenario_for_name",
+        lambda name, target, seed: NeverRunScenario(),
+    )
+    resumed = run_resume(settings, record.run_id)
+
+    assert [keyword.keyword for keyword in resumed.data.keywords] == ["topic one"]
+
+
+def test_rerun_repeats_the_original_request_including_seed_and_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "rerun-request")
+    engine = open_database(settings)
+    try:
+        record = _competitor_record(settings, seed="running shoes", limit=5)
+        RunStore(engine).create(record)
+    finally:
+        engine.dispose()
+
+    captured: dict[str, object] = {}
+
+    def fake_run_research(
+        settings: Settings, target: str, **kwargs: object
+    ) -> Envelope[ResearchData]:
+        captured.update(kwargs)
+        captured["target"] = target
+        return Envelope(data=_data(), run_id="run_new")
+
+    monkeypatch.setattr(runs_module, "run_research", fake_run_research)
+    run_rerun(settings, record.run_id)
+
+    assert captured["target"] == "example.com"
+    assert captured["seed_keyword"] == "running shoes"
+    assert captured["limit"] == 5
+    assert captured["scenario"] == "competitor"
 
 
 def test_research_save_run_sets_id_and_without_save_run_stores_nothing(

@@ -46,6 +46,11 @@ class RunRecord(BaseModel):
     language: str
     country: str
     status: RunStatus
+    # The rest of the original request. `resume` and `rerun` rebuild the
+    # scenario from this record, so anything missing here is silently dropped
+    # and the repeat answers a different question than the user asked.
+    seed_keyword: str | None = None
+    limit: int | None = None
     app_version: str
     parser_version: str
     budget: Budget
@@ -94,9 +99,10 @@ class RunStore:
                 """
                 INSERT INTO runs (
                     run_id, scenario, target, language, country, status,
+                    seed_keyword, result_limit,
                     app_version, parser_version, budget, config_snapshot,
                     result, error, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     record.run_id,
@@ -105,6 +111,8 @@ class RunStore:
                     record.language,
                     record.country,
                     record.status.value,
+                    record.seed_keyword,
+                    record.limit,
                     record.app_version,
                     record.parser_version,
                     _json(record.budget.model_dump(mode="json")),
@@ -124,7 +132,8 @@ class RunStore:
                 """
                 SELECT run_id, scenario, target, language, country, status,
                        app_version, parser_version, budget, config_snapshot,
-                       result, error, created_at, updated_at
+                       result, error, created_at, updated_at,
+                       seed_keyword, result_limit
                 FROM runs WHERE run_id = ?
                 """,
                 (run_id,),
@@ -280,5 +289,7 @@ class RunStore:
             error=row[11],
             created_at=row[12],
             updated_at=row[13],
+            seed_keyword=row[14],
+            limit=row[15],
             stages=stages,
         )

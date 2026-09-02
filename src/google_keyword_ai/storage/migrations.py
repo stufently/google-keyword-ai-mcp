@@ -4,7 +4,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from google_keyword_ai.errors import InvalidConfigurationError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _migration_1(connection: Connection) -> None:
@@ -69,7 +69,16 @@ def _migration_2(connection: Connection) -> None:
     )
 
 
-MIGRATIONS: list[Callable[[Connection], None]] = [_migration_1, _migration_2]
+def _migration_3(connection: Connection) -> None:
+    # A saved run has to remember the whole request, not just the target. Without
+    # the seed keyword a resumed competitor run silently changed shape, and
+    # without the limit a resume returned more keywords than the original.
+    # Existing rows predate both options and correctly read back as NULL.
+    connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN seed_keyword TEXT")
+    connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN result_limit INTEGER")
+
+
+MIGRATIONS: list[Callable[[Connection], None]] = [_migration_1, _migration_2, _migration_3]
 
 
 def apply_migrations(engine: Engine) -> int:

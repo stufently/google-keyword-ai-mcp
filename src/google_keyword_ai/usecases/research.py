@@ -102,9 +102,16 @@ async def _select_scenario(
 ) -> NewNicheResearch | CompetitorResearch | ExistingSiteResearch:
     if scenario != "auto":
         return _scenario_for_name(scenario, target, seed_keyword)
+    if target.startswith("sc-domain:"):
+        # A `sc-domain:` prefix names a Search Console property, never a web
+        # address. Falling through to competitor research when the property is
+        # unreachable would both contradict the plan the dry run showed and
+        # hand `sc-domain:example.com` to Google Ads as if it were a site URL.
+        # Existing-site research reports the missing property honestly instead.
+        return ExistingSiteResearch(target)
     if await _matches_property(context, target):
         return ExistingSiteResearch(target)
-    if _looks_like_domain_or_url(target) or target.startswith("sc-domain:"):
+    if _looks_like_domain_or_url(target):
         return CompetitorResearch(target, seed_keyword)
     return NewNicheResearch(target)
 
@@ -276,6 +283,8 @@ async def _execute_saved(
             app_version=__version__,
             parser_version=PARSER_VERSION,
             budget=budget,
+            seed_keyword=seed_keyword,
+            limit=limit,
             config_snapshot=masked_dump(settings),
             created_at=now,
             updated_at=now,

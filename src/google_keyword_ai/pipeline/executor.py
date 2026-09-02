@@ -164,6 +164,10 @@ class RunExecutor:
         self._store = store
         self._scenario = scenario
         self._stages = sorted(stages, key=lambda stage: stage.position)
+        # Whether the last `execute` actually ran the scenario. A resume that
+        # reused every checkpoint collected nothing, so its caller must not
+        # present a fresh, empty diagnostic context as the run's own result.
+        self.replayed = False
 
     async def execute(
         self,
@@ -172,6 +176,7 @@ class RunExecutor:
         *,
         resume: bool,
     ) -> ResearchData:
+        self.replayed = False
         version_reason: str | None = None
         if record.app_version != __version__:
             version_reason = (
@@ -188,6 +193,7 @@ class RunExecutor:
 
         saved_by_name = {stage.name: stage for stage in record.stages}
         runnable: list[tuple[Stage, StageRecord]] = []
+        reused: list[tuple[Stage, StageRecord]] = []
         last_checkpoint_data: ResearchData | None = None
         for stage in self._stages:
             saved = saved_by_name.get(stage.name)
@@ -206,6 +212,7 @@ class RunExecutor:
                 checkpoint_data = _checkpoint_data(saved.checkpoint)
                 if checkpoint_data is not None:
                     last_checkpoint_data = checkpoint_data
+                reused.append((stage, saved))
                 continue
             prior_attempts = 0 if saved is None else saved.attempts
             runnable.append(
@@ -244,6 +251,7 @@ class RunExecutor:
 
         first_stage, first_pending = runnable[0]
         first_running = start_stage(first_stage, first_pending)
+        self.replayed = True
 
         try:
             data = await self._scenario.run(context)
@@ -268,6 +276,23 @@ class RunExecutor:
             self._store.save_stage(
                 record.run_id,
                 running.model_copy(
+                    update={
+                        "status": StageStatus.COMPLETED,
+                        "checkpoint": _stage_checkpoint(stage, data),
+                        "error": None,
+                        "finished_at": datetime.now(UTC),
+                    }
+                ),
+            )
+        # One stale stage replays the whole scenario, so every checkpoint now
+        # describes the same fresh `data`. Refreshing only the replayed stages
+        # would leave the reused ones pointing at the previous result, and the
+        # next resume — which reuses all of them — would hand back that stale
+        # result instead of the one just computed.
+        for stage, saved in reused:
+            self._store.save_stage(
+                record.run_id,
+                saved.model_copy(
                     update={
                         "status": StageStatus.COMPLETED,
                         "checkpoint": _stage_checkpoint(stage, data),

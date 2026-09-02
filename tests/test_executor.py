@@ -355,3 +355,112 @@ def test_skipped_source_stage_has_completed_checkpoint(tmp_path: Path) -> None:
         assert saved.stages[0].checkpoint == {"skipped": True, "reason": "unavailable"}
     finally:
         engine.dispose()
+
+
+def test_one_stale_stage_replays_the_whole_scenario(tmp_path: Path) -> None:
+    """Resume is all-or-nothing, and docs/runs.md says so.
+
+    A scenario is a single coroutine, not a chain of separately invocable
+    stages, so the executor can only skip work when *every* stage is reusable.
+    With one stale stage it replays the scenario end to end and merely records
+    the stale stage; the reused checkpoint saves nothing. Repeat provider calls
+    are absorbed by the HTTP cache, not by the run store. This test pins that
+    behaviour so the promise in the docs cannot quietly drift away from it.
+    """
+    settings = Settings(data_dir=tmp_path / "partial-resume")
+    engine = open_database(settings)
+    try:
+        store = RecordingStore(engine)
+        stages = [
+            Stage(name="first", position=0, fingerprint_payload={"value": 1}),
+            Stage(name="second", position=1, fingerprint_payload={"value": 2}),
+        ]
+        record = _record(
+            settings,
+            stages,
+            statuses={"first": StageStatus.COMPLETED, "second": StageStatus.COMPLETED},
+            attempts=1,
+            checkpoint=_data().model_dump(mode="json"),
+        )
+        record.stages[1].fingerprint = "0" * 32
+        store.create(record)
+        scenario = FakeScenario()
+        anyio.run(
+            partial(
+                RunExecutor(store, scenario, stages).execute,
+                record,
+                _context(settings),
+                resume=True,
+            )
+        )
+
+        assert scenario.calls == 1
+        assert store.events == [
+            ("second", StageStatus.RUNNING),
+            ("second", StageStatus.COMPLETED),
+            # The reused stage is never re-run, but its checkpoint is rewritten
+            # so it describes the result the replay just produced.
+            ("first", StageStatus.COMPLETED),
+        ]
+        saved = store.get(record.run_id)
+        assert saved is not None
+        assert [stage.status for stage in saved.stages] == [
+            StageStatus.COMPLETED,
+            StageStatus.COMPLETED,
+        ]
+    finally:
+        engine.dispose()
+
+
+def test_replay_refreshes_the_checkpoint_of_a_reused_stage(tmp_path: Path) -> None:
+    """The mirror of the test above: the *first* stage is the stale one.
+
+    Refreshing only the replayed stages would leave the later, reused stage
+    holding the previous result. The executor picks the last reusable
+    checkpoint when nothing needs running, so the very next resume would hand
+    back that stale result and silently discard the replay.
+    """
+    settings = Settings(data_dir=tmp_path / "stale-first")
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        stages = [
+            Stage(name="first", position=0, fingerprint_payload={"value": 1}),
+            Stage(name="second", position=1, fingerprint_payload={"value": 2}),
+        ]
+        old_data = _data()
+        record = _record(
+            settings,
+            stages,
+            statuses={"first": StageStatus.COMPLETED, "second": StageStatus.COMPLETED},
+            attempts=1,
+            checkpoint=old_data.model_dump(mode="json"),
+        )
+        record.stages[0].fingerprint = "0" * 32
+        store.create(record)
+
+        fresh = old_data.model_copy(deep=True)
+        fresh.keywords[0].keyword = "fresh keyword"
+        replayed = anyio.run(
+            partial(
+                RunExecutor(store, FakeScenario(fresh), stages).execute,
+                record,
+                _context(settings),
+                resume=True,
+            )
+        )
+        assert replayed.keywords[0].keyword == "fresh keyword"
+
+        saved = store.get(record.run_id)
+        assert saved is not None
+        second_resume = anyio.run(
+            partial(
+                RunExecutor(store, FakeScenario(), stages).execute,
+                saved,
+                _context(settings),
+                resume=True,
+            )
+        )
+        assert second_resume.keywords[0].keyword == "fresh keyword"
+    finally:
+        engine.dispose()
