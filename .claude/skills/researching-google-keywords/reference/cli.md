@@ -3,6 +3,20 @@
 Run `gkai <command> --help` for the complete option contract. JSON is the default
 format unless shown otherwise.
 
+## Exit codes
+
+Every command prints its envelope to stdout and then exits according to
+`completeness`, so a non-zero status is a verdict about the data, not a crash:
+
+- `0` — `completeness: complete`.
+- `1` — `completeness: partial` or `empty`. Valid JSON was still printed; read
+  `completeness_reason`, `warnings` and `errors` to see what is missing.
+  Absent optional credentials and exhausted budgets land here.
+- `2` — the command line itself was rejected (unknown option, wrong number of
+  arguments). Nothing ran and no envelope was produced.
+
+Never report exit 1 as a failed run without parsing the envelope first.
+
 ## Availability and configuration
 
 ```bash
