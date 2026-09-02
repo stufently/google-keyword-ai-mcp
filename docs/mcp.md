@@ -6,7 +6,7 @@ Start the stdio server from the repository:
 uv run google-keyword-ai
 ```
 
-The installed-environment equivalent is `.venv/bin/google-keyword-ai`.
+Installing the wheel puts the same console script, `google-keyword-ai`, on `PATH`.
 
 ## Tools
 
@@ -30,7 +30,7 @@ The server exposes exactly 14 tools:
 Verify the registered list without starting a transport:
 
 ```bash
-.venv/bin/python -c "from google_keyword_ai.config import Settings; from google_keyword_ai.mcp.server import build_server; print(sorted(t.name for t in build_server(Settings())._tool_manager.list_tools()))"
+uv run --all-extras python -c "from google_keyword_ai.config import Settings; from google_keyword_ai.mcp.server import build_server; print(sorted(t.name for t in build_server(Settings())._tool_manager.list_tools()))"
 ```
 
 ## Claude Code
