@@ -173,7 +173,9 @@ requires a dry run before expensive research, and preserves source caveats.
 ## Limitations
 
 - Autocomplete and Trends use unofficial, undocumented Google endpoints with no
-  availability or compatibility guarantee. An official Trends API is unavailable.
+  availability or compatibility guarantee. An official Trends API exists but is in
+  closed alpha with application-gated access, so this project does not use it;
+  `OfficialTrendsAdapter` only reserves the seam.
 - Google Ads and Search Console are optional and require your own credentials and
   access. There is no interactive OAuth flow; only credential files/values are
   consumed.

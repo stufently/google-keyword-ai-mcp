@@ -41,8 +41,9 @@ src/google_keyword_ai/
   оборачивает через `anyio.run`, а функции MCP-инструментов синхронные —
   SDK сам уносит их в рабочий поток.
 - **Единый конверт ответа.** `schema_version`, `data`, `warnings`, `errors`,
-  `completeness`, `completeness_reason`, `run_id`; один сериализатор
-  `to_wire()` на оба интерфейса, паритет закреплён тестами.
+  `completeness`, `completeness_reason`, `run_id`. Модель `Envelope` общая,
+  сериализация — нет: CLI зовёт `to_wire()`, MCP отдаёт `Envelope` в SDK.
+  Равенство wire-представлений держится на `tests/test_mcp_parity.py`.
 - **Дешёвое раньше дорогого.** Autocomplete и расширение бесплатны и идут
   первыми; Ads и GSC — по явному запросу и под бюджетом.
 - **Частичный результат вместо отказа.** Отвалившийся провайдер даёт

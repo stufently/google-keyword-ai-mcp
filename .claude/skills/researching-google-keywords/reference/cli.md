@@ -18,7 +18,7 @@ the effective configuration with secrets masked.
 ```bash
 gkai suggest "running shoes" --language en --country US --limit 20
 gkai expand "running shoes" --language en --country US --depth 2 --max-queries 100
-gkai trends "running shoes" "trail shoes" --country US --timeframe "today 12-m"
+gkai trends compare "running shoes" "trail shoes" --country US --timeframe "today 12-m"
 ```
 
 `gkai suggest` performs one Autocomplete request. `gkai expand` fans out strategies

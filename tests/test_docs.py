@@ -119,6 +119,29 @@ def _documented_tools() -> tuple[set[str], int]:
     return set(re.findall(r"^- `([a-z_]+)`$", section.group(1), re.MULTILINE)), int(stated.group(1))
 
 
+def test_cli_reference_invents_no_commands() -> None:
+    """The other direction: a renamed or deleted command left behind in the docs.
+
+    Only the second token of a real *group* is checked. ``gkai trends compare``
+    is legitimate even though ``compare`` is no Typer subcommand -- ``trends``
+    takes it as a positional argument -- and ``trends`` is not a group, so the
+    pair is never examined.
+    """
+    text = (SKILL_DIR / "reference" / "cli.md").read_text(encoding="utf-8")
+    names, pairs = _cli_commands()
+    groups = {group for group, _ in pairs}
+
+    mentioned = re.findall(r"\bgkai ([a-z][a-z-]*)(?: ([a-z][a-z-]*))?", text)
+    assert mentioned
+    unknown = {f"gkai {first}" for first, _ in mentioned if first not in names} | {
+        f"gkai {first} {second}"
+        for first, second in mentioned
+        if first in groups and second and (first, second) not in pairs
+    }
+
+    assert not unknown
+
+
 def test_mcp_document_matches_registered_tools_exactly() -> None:
     """Both directions: an undocumented tool AND a tool documented but removed."""
     names = {tool.name for tool in build_server(Settings())._tool_manager.list_tools()}

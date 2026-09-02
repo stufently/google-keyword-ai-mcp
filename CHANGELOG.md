@@ -16,8 +16,8 @@
 
 - **Каркас** (M1): конфигурация через pydantic-settings, единый конверт ответа
   (`schema_version`, `data`, `warnings`, `errors`, `completeness`,
-  `completeness_reason`, `run_id`) с одним сериализатором `to_wire()` для CLI и
-  MCP, структурированные ошибки, JSON-логи в stderr, SQLite с forward-only
+  `completeness_reason`, `run_id`) — общая модель `Envelope` для CLI и MCP,
+  равенство wire-представлений закреплено parity-тестами, структурированные ошибки, JSON-логи в stderr, SQLite с forward-only
   миграциями по `PRAGMA user_version`, команда `gkai doctor`.
 - **Google Autocomplete** (M2): HTTP-слой с ретраями и джиттером, кеш ответов,
   нормализация запросов, учёт рынка (`hl`/`gl`), команда `gkai suggest`.
