@@ -30,7 +30,7 @@ def test_pragma_and_cache_schema_are_created(settings: Settings) -> None:
             assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
             assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 5000
             assert connection.exec_driver_sql("PRAGMA synchronous").scalar_one() == 1
-            assert connection.exec_driver_sql("PRAGMA user_version").scalar_one() == 1
+            assert connection.exec_driver_sql("PRAGMA user_version").scalar_one() == SCHEMA_VERSION
 
         inspector = inspect(engine)
         assert "cache_entries" in inspector.get_table_names()

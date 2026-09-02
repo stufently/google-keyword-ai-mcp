@@ -223,6 +223,43 @@ def test_research_dry_run_prints_plan_without_provider_calls(
     assert payload["data"]["estimated_autocomplete_queries"] == 10
 
 
+def test_run_list_prints_saved_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(data_dir=tmp_path / "run-list")
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_list", lambda active, limit=20: Envelope(data=[]))
+
+    result = CliRunner().invoke(cli_main.app, ["run", "list", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"] == []
+
+
+def test_research_save_run_flag_is_forwarded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "research-save")
+    captured: dict[str, object] = {}
+
+    def fake_run_research(
+        active_settings: Settings,
+        target: str,
+        **kwargs: object,
+    ) -> Envelope[dict[str, object]]:
+        captured["settings"] = active_settings
+        captured["target"] = target
+        captured.update(kwargs)
+        return Envelope(data={"saved": True}, run_id="run_0123456789abcdef0123456789")
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_research", fake_run_research)
+
+    result = CliRunner().invoke(cli_main.app, ["research", "topic", "--save-run"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["save_run"] is True
+    assert json.loads(result.stdout)["run_id"] == "run_0123456789abcdef0123456789"
+
+
 def test_expand_prints_json_envelope_and_forwards_options(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

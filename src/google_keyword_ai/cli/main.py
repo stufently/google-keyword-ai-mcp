@@ -18,6 +18,13 @@ from google_keyword_ai.usecases.gsc import (
     run_gsc_queries,
 )
 from google_keyword_ai.usecases.research import run_research
+from google_keyword_ai.usecases.runs import (
+    run_export,
+    run_list,
+    run_rerun,
+    run_resume,
+    run_show,
+)
 from google_keyword_ai.usecases.suggest import run_suggest
 from google_keyword_ai.usecases.trends import run_trends, run_trends_compare
 
@@ -25,9 +32,11 @@ app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 ads_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 gsc_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+run_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(config_app, name="config")
 app.add_typer(ads_app, name="ads")
 app.add_typer(gsc_app, name="gsc")
+app.add_typer(run_app, name="run")
 
 
 class OutputFormat(StrEnum):
@@ -314,6 +323,7 @@ def research(
     max_trends_calls: Annotated[int, typer.Option("--max-trends-calls")] = 3,
     max_runtime: Annotated[float, typer.Option("--max-runtime")] = 300.0,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    save_run: Annotated[bool, typer.Option("--save-run")] = False,
     limit: Annotated[int | None, typer.Option("--limit")] = None,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
 ) -> None:
@@ -338,10 +348,61 @@ def research(
                 ),
                 dry_run=dry_run,
                 limit=limit,
+                save_run=save_run,
             ),
         ),
         output_format,
     )
+
+
+@run_app.command("list")
+def run_list_command(
+    limit: Annotated[int, typer.Option("--limit")] = 20,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_list(settings, limit=limit), output_format)
+
+
+@run_app.command("show")
+def run_show_command(
+    run_id: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_show(settings, run_id), output_format)
+
+
+@run_app.command("export")
+def run_export_command(
+    run_id: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_export(settings, run_id), output_format)
+
+
+@run_app.command("resume")
+def run_resume_command(
+    run_id: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_resume(settings, run_id), output_format)
+
+
+@run_app.command("rerun")
+def run_rerun_command(
+    run_id: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_rerun(settings, run_id), output_format)
 
 
 def main() -> None:

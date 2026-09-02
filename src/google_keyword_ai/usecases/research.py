@@ -6,14 +6,25 @@ from functools import partial
 
 import anyio
 
-from google_keyword_ai.cache import SqliteCache
-from google_keyword_ai.config import Settings
+from google_keyword_ai import __version__
+from google_keyword_ai.cache import PARSER_VERSION, SqliteCache
+from google_keyword_ai.config import Settings, masked_dump
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.errors import GkaiError, InvalidConfigurationError
 from google_keyword_ai.http import build_client
 from google_keyword_ai.market import Market
 from google_keyword_ai.pipeline.budget import Budget, BudgetGuard, BudgetSpend
+from google_keyword_ai.pipeline.executor import RunExecutor, scenario_stages
 from google_keyword_ai.pipeline.models import DataQuality, DryRunPlan, ResearchData, ResearchStats
+from google_keyword_ai.pipeline.runs import (
+    RunRecord,
+    RunStatus,
+    RunStore,
+    StageRecord,
+    StageStatus,
+    new_run_id,
+    stage_fingerprint,
+)
 from google_keyword_ai.pipeline.scenarios import (
     GENERAL_CAVEAT,
     CompetitorResearch,
@@ -186,6 +197,148 @@ async def _execute(
         engine.dispose()
 
 
+def _envelope_for_research(
+    data: ResearchData,
+    warnings: list[str],
+    errors: list[str],
+    *,
+    run_id: str | None = None,
+) -> Envelope[ResearchData]:
+    has_data = bool(data.keywords or data.trends is not None or data.opportunities)
+    if not has_data:
+        reason = errors[0] if errors else warnings[-1] if warnings else "no research data"
+        return Envelope(
+            data=data,
+            warnings=warnings,
+            errors=errors,
+            completeness=Completeness.EMPTY,
+            completeness_reason=reason,
+            run_id=run_id,
+        )
+    if warnings or errors or data.stats.stopped_by is not None:
+        reason = (
+            errors[0]
+            if errors
+            else warnings[0]
+            if warnings
+            else f"stopped by {data.stats.stopped_by}"
+        )
+        return Envelope(
+            data=data,
+            warnings=warnings,
+            errors=errors,
+            completeness=Completeness.PARTIAL,
+            completeness_reason=reason,
+            run_id=run_id,
+        )
+    return Envelope(data=data, run_id=run_id)
+
+
+async def _execute_saved(
+    settings: Settings,
+    target: str,
+    scenario: str,
+    market: Market,
+    seed_keyword: str | None,
+    budget: Budget,
+    limit: int | None,
+) -> Envelope[ResearchData]:
+    engine = open_database(settings)
+    try:
+        cache = SqliteCache(engine, settings)
+        store = RunStore(engine)
+        preliminary = _dry_scenario(scenario, target, seed_keyword)
+        preliminary_name = preliminary.plan(_dry_context(settings, market, budget)).scenario
+        stages = scenario_stages(
+            preliminary_name,
+            target=target,
+            market=market,
+            budget=budget,
+            seed_keyword=seed_keyword,
+        )
+        pending_stages = [
+            StageRecord(
+                name=stage.name,
+                position=stage.position,
+                status=StageStatus.PENDING,
+                fingerprint=stage_fingerprint(stage.name, stage.fingerprint_payload),
+            )
+            for stage in stages
+        ]
+        now = datetime.now(UTC)
+        record = RunRecord(
+            run_id=new_run_id(),
+            scenario=preliminary_name,
+            target=target,
+            language=market.language,
+            country=market.country,
+            status=RunStatus.RUNNING,
+            app_version=__version__,
+            parser_version=PARSER_VERSION,
+            budget=budget,
+            config_snapshot=masked_dump(settings),
+            created_at=now,
+            updated_at=now,
+            stages=pending_stages,
+        )
+        store.create(record)
+        async with _live_context(settings, market, budget, cache) as context:
+            selected = await _select_scenario(context, scenario, target, seed_keyword)
+            scenario_name = selected.plan(_dry_context(settings, market, budget)).scenario
+            if scenario_name != preliminary_name:
+                stages = scenario_stages(
+                    scenario_name,
+                    target=target,
+                    market=market,
+                    budget=budget,
+                    seed_keyword=seed_keyword,
+                )
+                pending_stages = [
+                    StageRecord(
+                        name=stage.name,
+                        position=stage.position,
+                        status=StageStatus.PENDING,
+                        fingerprint=stage_fingerprint(
+                            stage.name,
+                            stage.fingerprint_payload,
+                        ),
+                    )
+                    for stage in stages
+                ]
+                store.replace_stages(
+                    record.run_id,
+                    scenario=scenario_name,
+                    stages=pending_stages,
+                )
+                record = record.model_copy(
+                    update={"scenario": scenario_name, "stages": pending_stages}
+                )
+            data = await RunExecutor(store, selected, stages).execute(
+                record,
+                context,
+                resume=False,
+            )
+            if limit is not None:
+                data.keywords = data.keywords[:limit]
+            envelope = _envelope_for_research(
+                data,
+                context.warnings,
+                context.errors,
+                run_id=record.run_id,
+            )
+            refreshed = store.get(record.run_id)
+            failed = refreshed is not None and refreshed.status is RunStatus.FAILED
+            store.finish(
+                record.run_id,
+                status=RunStatus.FAILED if failed else RunStatus.COMPLETED,
+                result=envelope.to_wire(),
+                error=context.errors[0] if failed and context.errors else None,
+            )
+            return envelope
+    finally:
+        engine.dispose()
+
+
 def run_research(
     settings: Settings,
     target: str,
@@ -197,6 +350,7 @@ def run_research(
     budget: Budget | None = None,
     dry_run: bool = False,
     limit: int | None = None,
+    save_run: bool = False,
 ) -> Envelope[ResearchData] | Envelope[DryRunPlan]:
     if scenario not in _SCENARIOS:
         raise InvalidConfigurationError(f"Unknown research scenario: {scenario}.")
@@ -211,6 +365,20 @@ def run_research(
         context = _dry_context(settings, market, active_budget)
         selected = _dry_scenario(scenario, target, seed_keyword)
         return Envelope(data=selected.plan(context))
+
+    if save_run:
+        return anyio.run(
+            partial(
+                _execute_saved,
+                settings,
+                target,
+                scenario,
+                market,
+                seed_keyword,
+                active_budget,
+                limit,
+            )
+        )
 
     try:
         data, warnings, errors = anyio.run(
@@ -251,29 +419,4 @@ def run_research(
             completeness_reason=str(exc),
         )
 
-    has_data = bool(data.keywords or data.trends is not None or data.opportunities)
-    if not has_data:
-        reason = errors[0] if errors else warnings[-1] if warnings else "no research data"
-        return Envelope(
-            data=data,
-            warnings=warnings,
-            errors=errors,
-            completeness=Completeness.EMPTY,
-            completeness_reason=reason,
-        )
-    if warnings or errors or data.stats.stopped_by is not None:
-        reason = (
-            errors[0]
-            if errors
-            else warnings[0]
-            if warnings
-            else f"stopped by {data.stats.stopped_by}"
-        )
-        return Envelope(
-            data=data,
-            warnings=warnings,
-            errors=errors,
-            completeness=Completeness.PARTIAL,
-            completeness_reason=reason,
-        )
-    return Envelope(data=data)
+    return _envelope_for_research(data, warnings, errors)

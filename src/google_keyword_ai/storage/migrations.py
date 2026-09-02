@@ -4,7 +4,7 @@ from sqlalchemy.engine import Connection, Engine
 
 from google_keyword_ai.errors import InvalidConfigurationError
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _migration_1(connection: Connection) -> None:
@@ -27,7 +27,49 @@ def _migration_1(connection: Connection) -> None:
     )
 
 
-MIGRATIONS: list[Callable[[Connection], None]] = [_migration_1]
+def _migration_2(connection: Connection) -> None:
+    connection.exec_driver_sql(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            scenario TEXT NOT NULL,
+            target TEXT NOT NULL,
+            language TEXT NOT NULL,
+            country TEXT NOT NULL,
+            status TEXT NOT NULL,
+            app_version TEXT NOT NULL,
+            parser_version TEXT NOT NULL,
+            budget TEXT NOT NULL,
+            config_snapshot TEXT NOT NULL,
+            result TEXT,
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.exec_driver_sql("CREATE INDEX ix_runs_created_at ON runs (created_at)")
+    connection.exec_driver_sql(
+        """
+        CREATE TABLE run_stages (
+            run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            position INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            fingerprint TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            checkpoint TEXT,
+            error TEXT,
+            started_at TEXT,
+            finished_at TEXT,
+            PRIMARY KEY (run_id, name),
+            CHECK (status != 'completed' OR checkpoint IS NOT NULL)
+        )
+        """
+    )
+
+
+MIGRATIONS: list[Callable[[Connection], None]] = [_migration_1, _migration_2]
 
 
 def apply_migrations(engine: Engine) -> int:
