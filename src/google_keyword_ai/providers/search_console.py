@@ -343,11 +343,18 @@ class SearchConsoleProvider(Provider):
         while current_day <= end:
             start_row = 0
             while True:
+                # Never ask for more than the cap still allows. Asking for a
+                # whole page and checking afterwards lets one page overshoot by
+                # up to `page_size` rows -- 25,000 with the defaults -- which
+                # makes a setting named "cap" no such thing.
+                requested_rows = min(
+                    page_size, self._settings.search_console_daily_row_cap - rows_fetched
+                )
                 body: dict[str, Any] = {
                     "startDate": current_day.isoformat(),
                     "endDate": current_day.isoformat(),
                     "dimensions": requested_dimensions,
-                    "rowLimit": page_size,
+                    "rowLimit": requested_rows,
                     "startRow": start_row,
                     "type": search_type,
                     "dataState": data_state,
@@ -368,7 +375,7 @@ class SearchConsoleProvider(Provider):
                 all_rows.extend(page_rows)
                 rows_fetched += len(page_rows)
                 # A full page means another may follow; a short one ends the day.
-                more_to_read = len(page_rows) == page_size or current_day < end
+                more_to_read = len(page_rows) == requested_rows or current_day < end
                 # Spending the whole cap is only a truncation if it stopped work
                 # that remained. A range whose last row happens to land exactly
                 # on the cap was read in full, and calling that incomplete
@@ -379,12 +386,14 @@ class SearchConsoleProvider(Provider):
                         "Search Console daily row cap of "
                         f"{self._settings.search_console_daily_row_cap} reached while reading "
                         f"{start.isoformat()}..{end.isoformat()} (stopped at "
-                        f"{current_day.isoformat()}); the result is incomplete."
+                        f"{current_day.isoformat()}); rows may be missing. The cap bounds what "
+                        "is extracted, so a request it shrinks cannot confirm that nothing "
+                        "remained."
                     )
                     break
-                if len(page_rows) < page_size:
+                if len(page_rows) < requested_rows:
                     break
-                start_row += page_size
+                start_row += requested_rows
             if truncated:
                 break
             current_day += timedelta(days=1)

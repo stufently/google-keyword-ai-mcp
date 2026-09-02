@@ -208,3 +208,46 @@ def test_a_budget_stop_keeps_its_reason_and_still_reports_the_failures(
     assert envelope.completeness is Completeness.PARTIAL
     assert envelope.completeness_reason == "stopped by max_queries"
     assert "3 of 10" in envelope.warnings[0]
+
+
+def test_an_empty_result_built_on_failures_says_so_instead_of_no_keywords(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An empty answer is exactly where the difference matters most.
+
+    "no keywords" reads as an empty niche. When every request failed, the niche
+    was never measured at all, and the caller who cannot tell those apart draws
+    the opposite conclusion from the one the data supports.
+    """
+    monkeypatch.setattr(
+        expand_usecase,
+        "_fetch_expansion",
+        _stub_result(
+            [],
+            ExpansionStats(queries_executed=88, depth_reached=0, queries_failed=80),
+        ),
+    )
+
+    envelope = expand_usecase.run_expand(Settings(data_dir=data_dir), "seed")
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason is not None
+    assert "80 of 88" in envelope.completeness_reason
+    assert envelope.warnings == [envelope.completeness_reason]
+
+
+def test_an_empty_result_without_failures_still_says_no_keywords(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plain empty answer must not be dressed up as a failure either."""
+    monkeypatch.setattr(
+        expand_usecase,
+        "_fetch_expansion",
+        _stub_result([], ExpansionStats(queries_executed=88, depth_reached=0)),
+    )
+
+    envelope = expand_usecase.run_expand(Settings(data_dir=data_dir), "seed")
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == "no keywords"
+    assert envelope.warnings == []

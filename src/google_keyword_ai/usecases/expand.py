@@ -139,14 +139,11 @@ def run_expand(
         stats=stats,
         keywords=keywords if limit is None else keywords[:limit],
     )
-    if not keywords:
-        return Envelope(
-            data=data,
-            completeness=Completeness.EMPTY,
-            completeness_reason="no keywords",
-        )
     # A skipped request costs keywords that were never collected, so a result
     # built on failures is thinner than it looks and must not read as whole.
+    # This is decided BEFORE the empty branch: an empty answer is exactly where
+    # the difference matters most, because "no keywords" reads as an empty
+    # niche when the truth may be that every request failed.
     failures = (
         []
         if not stats.queries_failed
@@ -155,6 +152,13 @@ def run_expand(
             "and were skipped; the keywords they would have returned are missing."
         ]
     )
+    if not keywords:
+        return Envelope(
+            data=data,
+            warnings=failures,
+            completeness=Completeness.EMPTY,
+            completeness_reason=failures[0] if failures else "no keywords",
+        )
     if stats.stopped_by in BUDGET_STOPS:
         return Envelope(
             data=data,

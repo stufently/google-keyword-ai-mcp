@@ -282,20 +282,19 @@ def test_truncation_cap_counts_across_days_not_per_day(tmp_path: Path) -> None:
     assert len(service.calls) == 2
 
 
-def test_a_range_that_ends_exactly_on_the_cap_is_complete(tmp_path: Path) -> None:
-    """Spending the whole cap is not the same as being cut off by it.
+def test_a_day_that_ends_before_the_cap_is_complete(tmp_path: Path) -> None:
+    """Spending part of the cap is not the same as being cut off by it.
 
-    The counter reaching the cap on the final short page of the final day means
-    the range was read in full and the budget happened to fit. Reporting that
-    as truncated makes the run partial and sends the caller hunting for rows
-    that were never withheld.
+    A short page proves the day held nothing more, and on the last day of the
+    range that makes the answer whole. Reporting it as truncated would make the
+    run partial and send the caller hunting for rows that were never withheld.
     """
     first = _row()
     first["keys"] = ["day-one"]
     second = _row()
     second["keys"] = ["day-two"]
     service = FakeService([{"rows": [first]}, {"rows": [second]}])
-    settings = _settings(tmp_path, search_console_daily_row_cap=2)
+    settings = _settings(tmp_path, search_console_daily_row_cap=50)
     provider, engine = _provider(settings, service)
     try:
         result = _query(
@@ -313,6 +312,42 @@ def test_a_range_that_ends_exactly_on_the_cap_is_complete(tmp_path: Path) -> Non
     assert result.truncation_reason is None
     assert [row.keys["query"] for row in result.rows] == ["day-one", "day-two"]
     assert len(service.calls) == 2
+
+
+def test_the_cap_bounds_what_is_asked_for_not_only_what_is_counted(tmp_path: Path) -> None:
+    """A cap checked after the fact is not a cap.
+
+    The cap exists to bound extraction on Google's side, so asking for a whole
+    page when the cap allows two more rows spends budget the caller forbade --
+    up to 25,000 rows past it with the defaults. The request itself has to
+    shrink, and a request the cap shrinks cannot prove nothing remained, so the
+    answer stays truncated.
+    """
+    rows = []
+    for index in range(3):
+        row = _row()
+        row["keys"] = [f"row-{index}"]
+        rows.append(row)
+    service = FakeService([{"rows": rows[:2]}])
+    settings = _settings(tmp_path, search_console_daily_row_cap=2)
+    provider, engine = _provider(settings, service)
+    try:
+        result = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 1),
+            dimensions=["query"],
+            row_limit=10,
+        )
+    finally:
+        engine.dispose()
+
+    assert [body["rowLimit"] for _, body in service.calls] == [2], (
+        "the cap, not the page size, decides how many rows may be asked for"
+    )
+    assert len(result.rows) == 2
+    assert result.truncated is True
 
 
 def _http_error(status: int) -> HttpError:

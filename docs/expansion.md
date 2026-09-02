@@ -25,8 +25,12 @@ Every seed first costs one direct query. A Russian pass with all strategies adds
 queries: about 107 requests including the direct seed query. Deeper expansion can
 therefore grow into tens of thousands of requests.
 
-`max_queries` caps executed requests, `max_results` caps unique candidates,
-`max_runtime` caps elapsed monotonic runtime, and `depth` caps recursive fan-out.
+`max_queries` caps executed requests, `max_runtime` caps elapsed monotonic
+runtime, and `depth` caps recursive fan-out. `max_results` is a stop threshold
+rather than a hard ceiling: it is checked before each request, so the response
+that crosses it is kept whole and the count can end slightly above the number
+asked for. Nothing already paid for is thrown away; the pipeline applies its own
+`max_keywords` afterwards when a firm ceiling is needed.
 
 `depth` counts **rounds** of fan-out, not levels below the first one: `--depth 1`
 queries the seed and its generated variants and stops there, `--depth 2` also
