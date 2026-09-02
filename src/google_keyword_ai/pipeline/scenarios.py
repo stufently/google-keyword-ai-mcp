@@ -282,6 +282,13 @@ async def _enrich_ads(
         _apply_ideas(keywords, ideas)
 
 
+def _cap[T](context: ScenarioContext, items: list[T], limit: int) -> list[T]:
+    """Trim a list to a budget limit, recording it as a cut when it bites."""
+    if len(items) > limit:
+        context.budget_guard.mark_cut("keywords")
+    return items[:limit]
+
+
 def _research_data(
     context: ScenarioContext,
     *,
@@ -351,13 +358,17 @@ class NewNicheResearch:
                     context.budget_guard.spend("autocomplete", query_spend)
 
         seed_normalized = normalize_keyword(self.seed)
-        filtered = [
-            candidate
-            for candidate in deduplicate(candidates)
-            if candidate.normalized
-            and len(candidate.normalized) > 1
-            and candidate.normalized != seed_normalized
-        ][: context.budget_guard.budget.max_keywords]
+        filtered = _cap(
+            context,
+            [
+                candidate
+                for candidate in deduplicate(candidates)
+                if candidate.normalized
+                and len(candidate.normalized) > 1
+                and candidate.normalized != seed_normalized
+            ],
+            context.budget_guard.budget.max_keywords,
+        )
         if filtered:
             context.budget_guard.spend("keywords", len(filtered))
         keywords = [
@@ -434,7 +445,10 @@ class CompetitorResearch:
             except GkaiError as exc:
                 context.errors.append(str(exc))
             else:
-                _apply_ideas(keywords, ideas[: context.budget_guard.budget.max_keywords])
+                _apply_ideas(
+                    keywords,
+                    _cap(context, list(ideas), context.budget_guard.budget.max_keywords),
+                )
                 if keywords:
                     context.budget_guard.spend("keywords", len(keywords))
         else:
@@ -452,7 +466,11 @@ class CompetitorResearch:
                 except GkaiError as exc:
                     context.errors.append(str(exc))
                 else:
-                    filtered = deduplicate(candidates)[: context.budget_guard.budget.max_keywords]
+                    filtered = _cap(
+                        context,
+                        deduplicate(candidates),
+                        context.budget_guard.budget.max_keywords,
+                    )
                     keywords = [
                         ResearchKeyword(
                             keyword=candidate.raw,
@@ -538,7 +556,9 @@ class ExistingSiteResearch:
                 context.errors.append(str(exc))
             else:
                 opportunities = find_opportunities(page.rows, context.settings)
-                for opportunity in opportunities[: context.budget_guard.budget.max_keywords]:
+                for opportunity in _cap(
+                    context, opportunities, context.budget_guard.budget.max_keywords
+                ):
                     keywords.append(
                         ResearchKeyword(
                             keyword=opportunity.query,

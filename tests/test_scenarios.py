@@ -181,12 +181,14 @@ def _context(
     ads: FakeAds | None = None,
     trends: FakeTrends | None = None,
     gsc: FakeGsc | None = None,
+    budget: Budget | None = None,
 ) -> ScenarioContext:
     return ScenarioContext(
         settings=settings,
         market=Market.parse("en", "US"),
         budget_guard=BudgetGuard(
-            Budget(
+            budget
+            or Budget(
                 max_keywords=100,
                 max_autocomplete_queries=50,
                 max_ads_calls=5,
@@ -384,6 +386,43 @@ def test_only_budget_stops_mark_a_research_run_cut_short(
 
         data = await NewNicheResearch("seed").run(context)
 
+        assert data.stats.stopped_by == expected
+
+    anyio.run(exercise)
+
+
+@pytest.mark.parametrize(
+    ("candidate_count", "expected"),
+    [(10, None), (25, "max_keywords")],
+)
+def test_a_keyword_budget_is_a_cut_only_when_it_actually_truncates(
+    settings: Settings, candidate_count: int, expected: str | None
+) -> None:
+    """Fitting inside the allowance exactly is a complete result.
+
+    The guard used to answer "exhausted" as soon as a counter equalled its
+    limit, so research that produced exactly `max_keywords` keywords -- having
+    lost nothing -- was reported as `partial / stopped by max_keywords`.
+    Truncation is now recorded where it happens, so both directions are honest.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        context = _context(
+            settings,
+            log=log,
+            expander=FakeExpander(log, _candidates(candidate_count)),
+            budget=Budget(
+                max_keywords=10,
+                max_autocomplete_queries=50,
+                max_ads_calls=5,
+                max_trends_calls=2,
+            ),
+        )
+
+        data = await NewNicheResearch("seed").run(context)
+
+        assert len(data.keywords) == 10
         assert data.stats.stopped_by == expected
 
     anyio.run(exercise)
