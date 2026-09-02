@@ -18,14 +18,17 @@ from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.normalize import KeywordCandidate
+from google_keyword_ai.opportunities import Opportunity
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
 from google_keyword_ai.providers.google_ads import KeywordIdea, KeywordMetrics
+from google_keyword_ai.providers.search_console import SearchAnalyticsRow, SiteProperty
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 from google_keyword_ai.usecases.ads import AdsData
 from google_keyword_ai.usecases.doctor import run_doctor
 from google_keyword_ai.usecases.expand import ExpandData
+from google_keyword_ai.usecases.gsc import OpportunitiesData, PropertiesData, QueriesData
 from google_keyword_ai.usecases.trends import TrendsData
 
 
@@ -523,3 +526,159 @@ def test_competitor_cli_forwards_target(tmp_path: Path, monkeypatch: pytest.Monk
     assert captured["target"] == "https://example.com/page"
     assert captured["seed_keyword"] == "seed"
     assert captured["limit"] == 5
+
+
+def test_gsc_properties_cli_uses_properties_usecase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "gsc-properties")
+    expected = Envelope(
+        data=PropertiesData(
+            provider=ProviderInfo(name="search_console", official=True, stability="stable"),
+            properties=[
+                SiteProperty(
+                    site_url="sc-domain:example.com",
+                    permission_level="siteOwner",
+                )
+            ],
+        )
+    )
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_gsc_properties", lambda _settings: expected)
+
+    result = CliRunner().invoke(cli_main.app, ["gsc", "properties"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == expected.to_wire()
+
+
+def test_gsc_queries_cli_forwards_all_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "gsc-queries")
+    captured: dict[str, object] = {}
+    expected = Envelope(
+        data=QueriesData(
+            provider=ProviderInfo(name="search_console", official=True, stability="stable"),
+            site_url="sc-domain:example.com",
+            start_date="2026-08-01",
+            end_date="2026-08-02",
+            dimensions=["query", "page"],
+            rows=[
+                SearchAnalyticsRow(
+                    keys={"query": "keyword", "page": "https://example.com/page"},
+                    clicks=1,
+                    impressions=100,
+                    ctr=0.01,
+                    position=8,
+                )
+            ],
+            truncated=False,
+            truncation_reason=None,
+        )
+    )
+
+    def fake_run(
+        active_settings: Settings, site_url: str, **kwargs: object
+    ) -> Envelope[QueriesData]:
+        captured["settings"] = active_settings
+        captured["site_url"] = site_url
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_gsc_queries", fake_run)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "gsc",
+            "queries",
+            "sc-domain:example.com",
+            "--days",
+            "7",
+            "--start-date",
+            "2026-08-01",
+            "--end-date",
+            "2026-08-02",
+            "--dimension",
+            "query",
+            "--dimension",
+            "page",
+            "--country",
+            "US",
+            "--search-type",
+            "image",
+            "--limit",
+            "10",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["site_url"] == "sc-domain:example.com"
+    assert captured["days"] == 7
+    assert captured["dimensions"] == ["query", "page"]
+    assert captured["country"] == "US"
+    assert captured["search_type"] == "image"
+    assert captured["limit"] == 10
+
+
+def test_gsc_opportunities_cli_forwards_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "gsc-opportunities")
+    captured: dict[str, object] = {}
+    expected = Envelope(
+        data=OpportunitiesData(
+            provider=ProviderInfo(name="search_console", official=True, stability="stable"),
+            site_url="sc-domain:example.com",
+            start_date="2026-08-01",
+            end_date="2026-08-28",
+            thresholds={"min_impressions": 100.0},
+            opportunities=[
+                Opportunity(
+                    query="keyword",
+                    page="https://example.com/page",
+                    clicks=1,
+                    impressions=100,
+                    ctr=0.01,
+                    position=8,
+                    kind="quick_win",
+                    reason="test",
+                )
+            ],
+            truncated=False,
+        )
+    )
+
+    def fake_run(
+        active_settings: Settings, site_url: str, **kwargs: object
+    ) -> Envelope[OpportunitiesData]:
+        captured["settings"] = active_settings
+        captured["site_url"] = site_url
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_gsc_opportunities", fake_run)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "gsc",
+            "opportunities",
+            "sc-domain:example.com",
+            "--days",
+            "14",
+            "--country",
+            "US",
+            "--limit",
+            "3",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["site_url"] == "sc-domain:example.com"
+    assert captured["days"] == 14
+    assert captured["country"] == "US"
+    assert captured["limit"] == 3

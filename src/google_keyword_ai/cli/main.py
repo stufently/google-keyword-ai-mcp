@@ -11,14 +11,21 @@ from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.usecases.ads import run_ads_historical, run_ads_ideas, run_competitor
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
+from google_keyword_ai.usecases.gsc import (
+    run_gsc_opportunities,
+    run_gsc_properties,
+    run_gsc_queries,
+)
 from google_keyword_ai.usecases.suggest import run_suggest
 from google_keyword_ai.usecases.trends import run_trends, run_trends_compare
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 ads_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+gsc_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(config_app, name="config")
 app.add_typer(ads_app, name="ads")
+app.add_typer(gsc_app, name="gsc")
 
 
 class OutputFormat(StrEnum):
@@ -202,6 +209,67 @@ def ads_historical(
             keywords,
             language=language,
             country=country,
+        ),
+        output_format,
+    )
+
+
+@gsc_app.command("properties")
+def gsc_properties(
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_gsc_properties(settings), output_format)
+
+
+@gsc_app.command("queries")
+def gsc_queries(
+    site_url: str,
+    days: Annotated[int, typer.Option("--days")] = 28,
+    start_date: Annotated[str | None, typer.Option("--start-date")] = None,
+    end_date: Annotated[str | None, typer.Option("--end-date")] = None,
+    dimensions: Annotated[list[str] | None, typer.Option("--dimension")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    search_type: Annotated[str, typer.Option("--search-type")] = "web",
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_gsc_queries(
+            settings,
+            site_url,
+            days=days,
+            start_date=start_date,
+            end_date=end_date,
+            dimensions=dimensions,
+            country=country,
+            search_type=search_type,
+            limit=limit,
+        ),
+        output_format,
+    )
+
+
+@gsc_app.command("opportunities")
+def gsc_opportunities(
+    site_url: str,
+    days: Annotated[int, typer.Option("--days")] = 28,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_gsc_opportunities(
+            settings,
+            site_url,
+            days=days,
+            country=country,
+            limit=limit,
         ),
         output_format,
     )

@@ -11,6 +11,7 @@ from google_keyword_ai.usecases.ads import (
 )
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
 from google_keyword_ai.usecases.expand import ExpandData, run_expand
+from google_keyword_ai.usecases.gsc import OpportunitiesData, run_gsc_opportunities
 from google_keyword_ai.usecases.suggest import SuggestData, run_suggest
 from google_keyword_ai.usecases.trends import TrendsData, run_trends_compare
 
@@ -107,6 +108,21 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             target,
             seed_keyword=seed_keyword,
             language=language,
+            country=country,
+            limit=limit,
+        )
+
+    @server.tool()
+    def find_gsc_opportunities(
+        site_url: str,
+        days: int = 28,
+        country: str | None = None,
+        limit: int | None = None,
+    ) -> Envelope[OpportunitiesData]:
+        return run_gsc_opportunities(
+            active_settings,
+            site_url,
+            days=days,
             country=country,
             limit=limit,
         )

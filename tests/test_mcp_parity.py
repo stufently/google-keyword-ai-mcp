@@ -19,6 +19,7 @@ from google_keyword_ai.envelope import Envelope
 from google_keyword_ai.mcp import server as mcp_server
 from google_keyword_ai.mcp.server import build_server
 from google_keyword_ai.normalize import KeywordCandidate
+from google_keyword_ai.opportunities import Opportunity
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
@@ -27,6 +28,7 @@ from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 from google_keyword_ai.usecases.ads import AdsData
 from google_keyword_ai.usecases.doctor import run_doctor
 from google_keyword_ai.usecases.expand import ExpandData
+from google_keyword_ai.usecases.gsc import OpportunitiesData
 from google_keyword_ai.usecases.trends import TrendsData
 
 
@@ -440,3 +442,98 @@ def test_doctor_reports_google_ads_missing_credentials(tmp_path: Path) -> None:
     )
     assert google_ads.available is False
     assert google_ads.detail == "missing credentials"
+
+    search_console = next(
+        provider for provider in envelope.data.providers if provider.name == "search_console"
+    )
+    assert search_console.available is False
+    assert search_console.detail == "missing credentials"
+
+
+def test_find_gsc_opportunities_has_usecase_parity(
+    thread_offload: None,
+    monkeypatch: object,
+) -> None:
+    from pytest import MonkeyPatch
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    settings = Settings()
+    expected = Envelope(
+        data=OpportunitiesData(
+            provider=ProviderInfo(name="search_console", official=True, stability="stable"),
+            site_url="sc-domain:example.com",
+            start_date="2026-08-01",
+            end_date="2026-08-28",
+            thresholds={"min_impressions": 100.0},
+            opportunities=[
+                Opportunity(
+                    query="keyword",
+                    page="https://example.com/page",
+                    clicks=1,
+                    impressions=100,
+                    ctr=0.01,
+                    position=8,
+                    kind="quick_win",
+                    reason="test",
+                )
+            ],
+            truncated=False,
+        )
+    )
+
+    def fake_run(
+        _settings: Settings,
+        site_url: str,
+        **kwargs: object,
+    ) -> Envelope[OpportunitiesData]:
+        assert site_url == "sc-domain:example.com"
+        assert kwargs == {"days": 14, "country": "US", "limit": 3}
+        return expected
+
+    monkeypatch.setattr(mcp_server, "run_gsc_opportunities", fake_run)
+    server = build_server(settings)
+
+    async def call_tool() -> dict[str, object]:
+        async with (
+            create_client_server_memory_streams() as (
+                (client_read, client_write),
+                (server_read, server_write),
+            ),
+            anyio.create_task_group() as task_group,
+        ):
+            low_level_server = server._lowlevel_server
+
+            async def run_server() -> None:
+                await low_level_server.run(
+                    server_read,
+                    server_write,
+                    low_level_server.create_initialization_options(),
+                    raise_exceptions=True,
+                )
+
+            task_group.start_soon(run_server)
+            async with ClientSession(client_read, client_write) as client:
+                await client.initialize()
+                result = await client.call_tool(
+                    "find_gsc_opportunities",
+                    {
+                        "site_url": "sc-domain:example.com",
+                        "days": 14,
+                        "country": "US",
+                        "limit": 3,
+                    },
+                )
+            task_group.cancel_scope.cancel()
+
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    assert anyio.run(call_tool) == expected.to_wire()
+
+
+def test_find_gsc_opportunities_tool_is_synchronous(thread_offload: None) -> None:
+    server = build_server(Settings())
+    tool = server._tool_manager.get_tool("find_gsc_opportunities")
+    assert tool is not None
+    assert tool.is_async is False

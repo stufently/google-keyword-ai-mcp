@@ -1,9 +1,9 @@
 import os
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Self
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from google_keyword_ai import __version__
@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     google_ads_historical_cache_ttl_seconds: int = 2592000
     google_ads_page_size: int = 1000
     search_console_credentials_path: Path | None = None
+    search_console_row_limit: int = 25000
+    search_console_daily_row_cap: int = 50000
+    search_console_cache_ttl_seconds: int = 21600
+    search_console_rate_limit_per_second: float = 5.0
+    gsc_opportunity_min_impressions: int = 100
+    gsc_opportunity_min_position: float = 5.0
+    gsc_opportunity_max_position: float = 30.0
+    gsc_opportunity_max_ctr: float = 0.02
 
     @field_validator("log_level")
     @classmethod
@@ -75,6 +83,9 @@ class Settings(BaseSettings):
         "autocomplete_rate_limit_per_second",
         "trends_pacing_seconds",
         "google_ads_rate_limit_per_second",
+        "search_console_rate_limit_per_second",
+        "gsc_opportunity_min_position",
+        "gsc_opportunity_max_position",
     )
     @classmethod
     def validate_positive_float(cls, value: float) -> float:
@@ -113,6 +124,43 @@ class Settings(BaseSettings):
         if value < 1:
             raise InvalidConfigurationError("trends_circuit_breaker_failures must be at least 1.")
         return value
+
+    @field_validator("search_console_row_limit")
+    @classmethod
+    def validate_search_console_row_limit(cls, value: int) -> int:
+        if not 1 <= value <= 25000:
+            raise InvalidConfigurationError("search_console_row_limit must be between 1 and 25000.")
+        return value
+
+    @field_validator(
+        "search_console_daily_row_cap",
+        "search_console_cache_ttl_seconds",
+        "gsc_opportunity_min_impressions",
+    )
+    @classmethod
+    def validate_positive_search_console_integer(cls, value: int) -> int:
+        if value <= 0:
+            raise InvalidConfigurationError(
+                "Search Console limits and thresholds must be positive."
+            )
+        return value
+
+    @field_validator("gsc_opportunity_max_ctr")
+    @classmethod
+    def validate_gsc_opportunity_max_ctr(cls, value: float) -> float:
+        if not 0 < value <= 1:
+            raise InvalidConfigurationError(
+                "gsc_opportunity_max_ctr must be above 0 and at most 1."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_gsc_opportunity_position_window(self) -> Self:
+        if self.gsc_opportunity_min_position >= self.gsc_opportunity_max_position:
+            raise InvalidConfigurationError(
+                "gsc_opportunity_min_position must be below gsc_opportunity_max_position."
+            )
+        return self
 
 
 def _read_toml(path: Path) -> dict[str, object]:
