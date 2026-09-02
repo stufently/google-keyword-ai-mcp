@@ -2,7 +2,11 @@ from collections.abc import Sequence
 
 from google_keyword_ai.clustering import KeywordCluster, tokenize
 from google_keyword_ai.pipeline.models import ResearchData
-from google_keyword_ai.scoring import KeywordScore, compute_trend_growth
+from google_keyword_ai.scoring import (
+    KeywordScore,
+    compute_trend_growth,
+    trend_series_keyword,
+)
 
 
 def _cell(value: object) -> str:
@@ -70,12 +74,17 @@ def render_markdown(
         lines.append("No Trends data is available because the source was not used or unavailable.")
     elif growth is None:
         lines.append(
-            "Trend growth is unavailable because fewer than eight comparable timeline points exist."
+            "Trend growth is unavailable: the timeline does not offer two fully measured "
+            "quarters to compare."
         )
     else:
+        series = trend_series_keyword(data.trends)
+        subject = "one series" if series is None else f"the series for `{_cell(series)}`"
         lines.append(
-            f"Recent trend growth is {growth:+.2%}, calculated within normalization scope "
-            f"`{data.trends.normalization_scope}`."
+            f"Recent trend growth is {growth:+.2%} for {subject}, calculated within "
+            f"normalization scope `{data.trends.normalization_scope}`. Trends is queried "
+            "once per run, so this figure describes that series and not the keywords listed "
+            "above."
         )
 
     lines.extend(["", "## Long-tail opportunities", ""])

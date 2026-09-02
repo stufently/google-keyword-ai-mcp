@@ -2,6 +2,8 @@ from datetime import UTC, datetime
 
 from google_keyword_ai.clustering import cluster_keywords
 from google_keyword_ai.config import Settings
+from datetime import timedelta
+
 from google_keyword_ai.pipeline.budget import BudgetSpend
 from google_keyword_ai.pipeline.models import (
     DataQuality,
@@ -11,6 +13,7 @@ from google_keyword_ai.pipeline.models import (
     SourceUsage,
 )
 from google_keyword_ai.reports.markdown import render_markdown
+from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 from google_keyword_ai.scoring import score_keyword
 
 
@@ -92,3 +95,55 @@ def test_source_line_does_not_repeat_the_state_word() -> None:
 
     assert "- Source `autocomplete`: used\n" in report
     assert "- Source `trends`: used — 53 timeline points" in report
+
+
+def _trends(values: list[int], *, keyword: str = "alpha seed") -> TrendsResult:
+    now = datetime.now(UTC)
+    return TrendsResult(
+        keywords=[keyword],
+        geo="US",
+        timeframe="today 12-m",
+        normalization_scope="one-scope",
+        timeline=[
+            TrendPoint(
+                timestamp=now + timedelta(days=index),
+                formatted_time="",
+                values=[value],
+                has_data=[True],
+            )
+            for index, value in enumerate(values)
+        ],
+        retrieved_at=now,
+        source="google_trends",
+    )
+
+
+def test_the_report_says_which_series_the_trend_figure_describes() -> None:
+    """The report lists many keywords and one trend number, which invites the wrong reading.
+
+    Trends is queried once per run, for a single series. Printing a bare
+    percentage under a table of keywords reads as the trend of those keywords.
+    """
+    data = research().model_copy(update={"trends": _trends([10] * 4 + [20] * 4)})
+
+    rendered = render_markdown(data, [], [])
+
+    assert "alpha seed" in rendered
+    assert "not the keywords listed above" in rendered
+
+
+def test_an_unavailable_trend_does_not_blame_the_length_of_the_timeline() -> None:
+    """Too few points is one reason among others, and naming only it misleads.
+
+    A long timeline whose recent quarter Google could not measure also has no
+    comparable trend, and telling the reader it was too short sends them
+    looking for a longer window that would not help.
+    """
+    blind = _trends([10] * 8)
+    blind.timeline[-1].has_data = [False]
+    data = research().model_copy(update={"trends": blind})
+
+    rendered = render_markdown(data, [], [])
+
+    assert "two fully measured quarters" in rendered
+    assert "fewer than eight" not in rendered
