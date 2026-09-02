@@ -1,0 +1,4 @@
+.venv/
+.toolchain/
+.uv-cache/
+.git/
