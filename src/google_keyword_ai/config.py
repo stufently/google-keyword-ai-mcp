@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from google_keyword_ai import __version__
 from google_keyword_ai.errors import InvalidConfigurationError
 
 _APP_DIR = "google-keyword-ai-mcp"
@@ -25,6 +26,15 @@ class Settings(BaseSettings):
     log_level: str = "info"
     default_language: str = "en"
     default_country: str = "US"
+    http_timeout_seconds: float = 10.0
+    http_max_attempts: int = 3
+    http_backoff_base_seconds: float = 0.5
+    http_user_agent: str = (
+        f"google-keyword-ai/{__version__} (+https://github.com/stufently/google-keyword-ai-mcp)"
+    )
+    autocomplete_rate_limit_per_second: float = 5.0
+    autocomplete_cache_ttl_seconds: int = 86400
+    cache_enabled: bool = True
     google_ads_developer_token: SecretStr | None = None
     google_ads_customer_id: str | None = None
     google_ads_login_customer_id: str | None = None
@@ -42,6 +52,30 @@ class Settings(BaseSettings):
                 f"Unknown log level: {value}. Expected debug, info, warning, or error."
             )
         return normalized
+
+    @field_validator("http_max_attempts")
+    @classmethod
+    def validate_http_max_attempts(cls, value: int) -> int:
+        if value < 1:
+            raise InvalidConfigurationError("http_max_attempts must be at least 1.")
+        return value
+
+    @field_validator(
+        "http_timeout_seconds",
+        "autocomplete_rate_limit_per_second",
+    )
+    @classmethod
+    def validate_positive_float(cls, value: float) -> float:
+        if value <= 0:
+            raise InvalidConfigurationError("HTTP timing and rate-limit values must be positive.")
+        return value
+
+    @field_validator("autocomplete_cache_ttl_seconds")
+    @classmethod
+    def validate_positive_ttl(cls, value: int) -> int:
+        if value <= 0:
+            raise InvalidConfigurationError("autocomplete_cache_ttl_seconds must be positive.")
+        return value
 
 
 def _read_toml(path: Path) -> dict[str, object]:

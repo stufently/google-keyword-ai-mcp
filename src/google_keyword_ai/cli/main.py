@@ -8,6 +8,7 @@ from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
+from google_keyword_ai.usecases.suggest import run_suggest
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -55,6 +56,28 @@ def config_show(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(run_config_show(settings), output_format)
+
+
+@app.command()
+def suggest(
+    query: str,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_suggest(
+            settings,
+            query,
+            language=language,
+            country=country,
+            limit=limit,
+        ),
+        output_format,
+    )
 
 
 def main() -> None:

@@ -39,7 +39,7 @@ def _provider_statuses(settings: Settings) -> list[ProviderStatus]:
         else "missing credentials"
     )
     return [
-        ProviderStatus(name="autocomplete", available=True, detail="not implemented yet (M2/M3)"),
+        ProviderStatus(name="autocomplete", available=True, detail="ready"),
         ProviderStatus(name="trends", available=True, detail="not implemented yet (M2/M3)"),
         ProviderStatus(name="google_ads", available=False, detail=google_ads_detail),
         ProviderStatus(name="search_console", available=False, detail=search_console_detail),

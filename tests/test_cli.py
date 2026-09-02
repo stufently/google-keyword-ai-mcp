@@ -5,12 +5,17 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+import respx
 import structlog
+from typer.testing import CliRunner
 
+from google_keyword_ai.cli import main as cli_main
 from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.usecases.doctor import run_doctor
 
 
@@ -45,6 +50,10 @@ def test_doctor_json_envelope(tmp_path: Path) -> None:
     assert payload["schema_version"] == "1.0.0"
     assert payload["completeness"] == "complete"
     assert len(payload["data"]["providers"]) == 4
+    autocomplete = next(
+        provider for provider in payload["data"]["providers"] if provider["name"] == "autocomplete"
+    )
+    assert autocomplete == {"name": "autocomplete", "available": True, "detail": "ready"}
     assert result.stdout.count("\n") == 1
 
 
@@ -121,3 +130,50 @@ def test_reconfigure_logging_does_not_duplicate_output(
     assert captured.out == ""
     assert len(captured.err.splitlines()) == 1
     assert json.loads(captured.err)["event"] == "one_event"
+
+
+def test_suggest_prints_json_envelope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(data_dir=tmp_path / "suggest-data", http_max_attempts=1)
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(
+            PRIMARY_ENDPOINT,
+            params={
+                "client": "chrome",
+                "ie": "utf-8",
+                "oe": "utf-8",
+                "q": "seed",
+                "hl": "en",
+                "gl": "US",
+            },
+        ).mock(return_value=httpx.Response(200, json=["seed", ["seed one"]]))
+        result = CliRunner().invoke(
+            cli_main.app,
+            ["suggest", "seed", "--language", "en", "--country", "US", "--limit", "1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    payload: dict[str, Any] = json.loads(result.stdout)
+    assert payload["completeness"] == "complete"
+    assert payload["data"]["suggestions"][0]["text"] == "seed one"
+
+
+def test_third_party_logs_go_to_stderr_not_stdout(tmp_path: Path) -> None:
+    """stdout carries protocol and JSON only.
+
+    httpx logs every request through the standard library. Without our own
+    handler something else installs one, the format diverges from structlog, and
+    a misconfigured stream would corrupt both the MCP stdio protocol and the
+    machine-readable CLI output.
+    """
+    import logging as stdlib_logging
+
+    configure_logging("debug")
+    httpx_logger = stdlib_logging.getLogger("httpx")
+    assert httpx_logger.getEffectiveLevel() == stdlib_logging.WARNING
+    handlers = stdlib_logging.getLogger().handlers
+    assert handlers, "root logger must have a handler of ours"
+    assert all(getattr(handler, "stream", sys.stderr) is sys.stderr for handler in handlers), (
+        "every handler must write to stderr"
+    )
