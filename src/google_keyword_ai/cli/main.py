@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from enum import StrEnum
 from typing import Annotated, cast
 
@@ -7,12 +8,17 @@ import typer
 from google_keyword_ai.clustering import cluster_keywords
 from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
+from google_keyword_ai.errors import GkaiError
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.pipeline.budget import Budget
 from google_keyword_ai.pipeline.models import ResearchData
 from google_keyword_ai.reports.markdown import render_markdown
-from google_keyword_ai.scoring import compute_trend_growth, score_keyword
+from google_keyword_ai.scoring import (
+    compute_trend_growth,
+    score_keyword,
+    trend_series_keyword,
+)
 from google_keyword_ai.usecases.ads import run_ads_historical, run_ads_ideas, run_competitor
 from google_keyword_ai.usecases.analysis import (
     run_cluster,
@@ -79,7 +85,29 @@ def _print_envelope[T](envelope: Envelope[T], output_format: OutputFormat) -> No
         typer.echo(f"{name}\t{rendered}")
 
 
-def _finish[T](envelope: Envelope[T], output_format: OutputFormat) -> None:
+def _error_envelope(exc: GkaiError) -> Envelope[None]:
+    """Turn a refused request into the empty envelope the contract promises."""
+    return Envelope(
+        data=None,
+        errors=[exc.message],
+        completeness=Completeness.EMPTY,
+        completeness_reason=exc.message,
+    )
+
+
+def _finish[T](build: Callable[[], Envelope[T]], output_format: OutputFormat) -> None:
+    """Print the envelope a command produced, then exit on its completeness.
+
+    The builder is a callable rather than a finished envelope so that a
+    `GkaiError` raised while producing it lands here. Exit code 1 is documented
+    as a verdict about the data that still prints valid output; letting the
+    error escape instead exits 1 with an empty stdout and a Python traceback,
+    which is the one thing a caller reading that contract cannot handle.
+    """
+    try:
+        envelope: Envelope[T | None] = cast("Envelope[T | None]", build())
+    except GkaiError as exc:
+        envelope = cast("Envelope[T | None]", _error_envelope(exc))
     _print_envelope(envelope, output_format)
     if envelope.completeness is not Completeness.COMPLETE:
         raise typer.Exit(code=1)
@@ -91,7 +119,7 @@ def doctor(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_doctor(settings), output_format)
+    _finish(lambda: run_doctor(settings), output_format)
 
 
 @config_app.command("show")
@@ -100,7 +128,7 @@ def config_show(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_config_show(settings), output_format)
+    _finish(lambda: run_config_show(settings), output_format)
 
 
 @app.command()
@@ -114,7 +142,7 @@ def suggest(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_suggest(
+        lambda: run_suggest(
             settings,
             query,
             language=language,
@@ -144,7 +172,7 @@ def expand(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_expand(
+        lambda: run_expand(
             settings,
             seed,
             language=language,
@@ -172,7 +200,7 @@ def trends(
     configure_logging(settings.log_level)
     if keywords and keywords[0] == "compare":
         _finish(
-            run_trends_compare(
+            lambda: run_trends_compare(
                 settings,
                 keywords[1:],
                 language=language,
@@ -187,7 +215,7 @@ def trends(
             "Provide one keyword, or use 'trends compare <keyword> <keyword> ...'."
         )
     _finish(
-        run_trends(
+        lambda: run_trends(
             settings,
             keywords[0],
             language=language,
@@ -212,7 +240,7 @@ def ads_ideas(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_ads_ideas(
+        lambda: run_ads_ideas(
             settings,
             keywords,
             url=url,
@@ -236,7 +264,7 @@ def ads_historical(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_ads_historical(
+        lambda: run_ads_historical(
             settings,
             keywords,
             language=language,
@@ -252,7 +280,7 @@ def gsc_properties(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_gsc_properties(settings), output_format)
+    _finish(lambda: run_gsc_properties(settings), output_format)
 
 
 @gsc_app.command("queries")
@@ -270,7 +298,7 @@ def gsc_queries(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_gsc_queries(
+        lambda: run_gsc_queries(
             settings,
             site_url,
             days=days,
@@ -296,7 +324,7 @@ def gsc_opportunities(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_gsc_opportunities(
+        lambda: run_gsc_opportunities(
             settings,
             site_url,
             days=days,
@@ -319,7 +347,7 @@ def competitor(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(
-        run_competitor(
+        lambda: run_competitor(
             settings,
             target,
             seed_keyword=seed_keyword,
@@ -352,32 +380,43 @@ def research(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    result = run_research(
-        settings,
-        target,
-        scenario=scenario,
-        language=language,
-        country=country,
-        seed_keyword=seed_keyword,
-        budget=Budget(
-            max_keywords=max_keywords,
-            max_autocomplete_queries=max_autocomplete_queries,
-            max_ads_calls=max_ads_calls,
-            max_trends_calls=max_trends_calls,
-            max_runtime_seconds=max_runtime,
-        ),
-        dry_run=dry_run,
-        limit=limit,
-        save_run=save_run,
-    )
+    try:
+        result = run_research(
+            settings,
+            target,
+            scenario=scenario,
+            language=language,
+            country=country,
+            seed_keyword=seed_keyword,
+            budget=Budget(
+                max_keywords=max_keywords,
+                max_autocomplete_queries=max_autocomplete_queries,
+                max_ads_calls=max_ads_calls,
+                max_trends_calls=max_trends_calls,
+                max_runtime_seconds=max_runtime,
+            ),
+            dry_run=dry_run,
+            limit=limit,
+            save_run=save_run,
+        )
+    except GkaiError as exc:
+        # A refused request produced no research, so markdown has nothing to
+        # render and falls back to the envelope rather than printing nothing.
+        refused = _error_envelope(exc)
+        fallback = (
+            OutputFormat.TABLE if output_format is ResearchOutputFormat.TABLE else OutputFormat.JSON
+        )
+        _finish(lambda: refused, fallback)
+        return
     if output_format is ResearchOutputFormat.MARKDOWN:
         if not isinstance(result.data, ResearchData):
             raise typer.BadParameter(
                 "Markdown format is available only for a completed research run."
             )
         growth = compute_trend_growth(result.data.trends)
+        source = trend_series_keyword(result.data.trends)
         scores = [
-            score_keyword(keyword, settings, trend_growth=growth)
+            score_keyword(keyword, settings, trend_growth=growth, trend_source=source)
             for keyword in result.data.keywords
         ]
         clusters = cluster_keywords([keyword.keyword for keyword in result.data.keywords], settings)
@@ -385,7 +424,7 @@ def research(
         if result.completeness is not Completeness.COMPLETE:
             raise typer.Exit(code=1)
         return
-    _finish(cast(Envelope[object], result), OutputFormat(output_format.value))
+    _finish(lambda: cast(Envelope[object], result), OutputFormat(output_format.value))
 
 
 @app.command()
@@ -396,7 +435,7 @@ def score(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_score(settings, run_id, limit=limit), output_format)
+    _finish(lambda: run_score(settings, run_id, limit=limit), output_format)
 
 
 @app.command()
@@ -406,7 +445,7 @@ def cluster(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_cluster(settings, run_id), output_format)
+    _finish(lambda: run_cluster(settings, run_id), output_format)
 
 
 @app.command("explain-score")
@@ -417,7 +456,7 @@ def explain_score_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_explain_score(settings, run_id, keyword), output_format)
+    _finish(lambda: run_explain_score(settings, run_id, keyword), output_format)
 
 
 @niche_app.command("analyze")
@@ -427,7 +466,7 @@ def niche_analyze_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_niche_analyze(settings, run_id), output_format)
+    _finish(lambda: run_niche_analyze(settings, run_id), output_format)
 
 
 @keyword_app.command("inspect")
@@ -438,7 +477,7 @@ def keyword_inspect_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_keyword_inspect(settings, run_id, keyword), output_format)
+    _finish(lambda: run_keyword_inspect(settings, run_id, keyword), output_format)
 
 
 @run_app.command("list")
@@ -448,7 +487,7 @@ def run_list_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_list(settings, limit=limit), output_format)
+    _finish(lambda: run_list(settings, limit=limit), output_format)
 
 
 @run_app.command("show")
@@ -458,7 +497,7 @@ def run_show_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_show(settings, run_id), output_format)
+    _finish(lambda: run_show(settings, run_id), output_format)
 
 
 @run_app.command("export")
@@ -468,7 +507,7 @@ def run_export_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_export(settings, run_id), output_format)
+    _finish(lambda: run_export(settings, run_id), output_format)
 
 
 @run_app.command("resume")
@@ -478,7 +517,7 @@ def run_resume_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_resume(settings, run_id), output_format)
+    _finish(lambda: run_resume(settings, run_id), output_format)
 
 
 @run_app.command("rerun")
@@ -488,7 +527,7 @@ def run_rerun_command(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(run_rerun(settings, run_id), output_format)
+    _finish(lambda: run_rerun(settings, run_id), output_format)
 
 
 def main() -> None:

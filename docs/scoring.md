@@ -35,12 +35,19 @@ Trend growth compares the mean of the last quarter of a timeline with the
 previous quarter. It requires at least eight points and uses `values[0]` from
 one Trends response. Values are comparable only inside that response's single
 `normalization_scope`; values from different requests must never be compared.
+Points Google marks as having no data are dropped rather than read as zero
+interest: a week that could not be measured is not a week of no demand, and
+averaging those zeros in would report a collapse that never happened.
+
+The trend component belongs to the run, not to the keyword next to it. Trends
+is queried once per run, for a single series, and that one growth figure scores
+every keyword — so each explanation names the series it came from.
 
 ## Niche factors
 
 Niche analysis separately reports total measurable demand, significant-keyword
-count, long-tail depth, trend direction, commercial value, demand concentration
-outside the top five, cluster diversity, and existing-site coverage. Its score
+count, long-tail depth, trend direction, commercial value, the share of demand
+held by the top five keywords, cluster diversity, and existing-site coverage. Its score
 is the arithmetic mean of available factors. The factor breakdown is always
 shown because a lone aggregate would hide which sources were missing and which
 market characteristic drove the result.

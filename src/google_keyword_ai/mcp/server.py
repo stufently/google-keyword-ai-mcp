@@ -1,11 +1,15 @@
-from typing import cast
+import functools
+from collections.abc import Callable
+from typing import Any, cast
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from google_keyword_ai import __version__
 from google_keyword_ai.clustering import KeywordCluster
 from google_keyword_ai.config import Settings, load_settings
 from google_keyword_ai.envelope import Envelope
+from google_keyword_ai.errors import GkaiError
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.pipeline.models import DryRunPlan, ResearchData
 from google_keyword_ai.scoring import KeywordScore
@@ -36,14 +40,37 @@ def build_server(settings: Settings | None = None) -> MCPServer:
     active_settings = load_settings() if settings is None else settings
     server = MCPServer(name="google-keyword-ai", version=__version__)
 
+    def tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        """Register a tool that reports a refused request instead of crashing.
+
+        A `GkaiError` is a failure this code saw coming and described -- an
+        unusable date range, a limit that is not positive. Letting it escape
+        makes the SDK treat the call as a crash and withhold the text, so the
+        caller is told only "Error executing tool <name>" and cannot tell a
+        rejected argument from a broken server. `ToolError` is the SDK's own
+        name for an anticipated failure, and its message reaches the caller.
+        """
+
+        def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+            @functools.wraps(function)
+            def guarded(*args: object, **kwargs: object) -> object:
+                try:
+                    return function(*args, **kwargs)
+                except GkaiError as exc:
+                    raise ToolError(exc.message) from exc
+
+            return cast(Callable[..., Any], server.tool()(guarded))
+
+        return decorate
+
     # Synchronous on purpose: the SDK offloads sync tool functions to a worker
     # thread (anyio.to_thread.run_sync), while an async one would run blocking
     # database and network work directly on the event loop and stall stdio.
-    @server.tool()
+    @tool()
     def doctor() -> Envelope[DoctorData]:
         return run_doctor(active_settings)
 
-    @server.tool()
+    @tool()
     def suggest_keywords(
         query: str,
         language: str | None = None,
@@ -58,7 +85,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             limit=limit,
         )
 
-    @server.tool()
+    @tool()
     def expand_keywords(
         seed: str,
         language: str | None = None,
@@ -83,7 +110,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             limit=limit,
         )
 
-    @server.tool()
+    @tool()
     def analyze_trends(
         keywords: list[str],
         language: str | None = None,
@@ -98,7 +125,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             timeframe=timeframe,
         )
 
-    @server.tool()
+    @tool()
     def get_keyword_metrics(
         keywords: list[str],
         language: str | None = None,
@@ -111,7 +138,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             country=country,
         )
 
-    @server.tool()
+    @tool()
     def analyze_competitor(
         target: str,
         seed_keyword: str | None = None,
@@ -128,7 +155,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             limit=limit,
         )
 
-    @server.tool()
+    @tool()
     def find_gsc_opportunities(
         site_url: str,
         days: int = 28,
@@ -143,7 +170,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             limit=limit,
         )
 
-    @server.tool()
+    @tool()
     def research_keywords(
         target: str,
         scenario: str = "auto",
@@ -169,7 +196,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
     # under a "result" key while the CLI prints the envelope itself — the two
     # interfaces would stop matching, which is exactly what the parity test
     # exists to prevent.
-    @server.tool()
+    @tool()
     def plan_research(
         target: str,
         scenario: str = "auto",
@@ -188,24 +215,24 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         )
         return cast(Envelope[DryRunPlan], envelope)
 
-    @server.tool()
-    def score_run(run_id: str, limit: int | None = None) -> Envelope[ScoredResearchData]:
+    @tool()
+    def score_run(run_id: str, limit: int | None = None) -> Envelope[ScoredResearchData | None]:
         return run_score(active_settings, run_id, limit=limit)
 
-    @server.tool()
-    def cluster_run(run_id: str) -> Envelope[list[KeywordCluster]]:
+    @tool()
+    def cluster_run(run_id: str) -> Envelope[list[KeywordCluster] | None]:
         return run_cluster(active_settings, run_id)
 
-    @server.tool()
-    def explain_score(run_id: str, keyword: str) -> Envelope[KeywordScore]:
+    @tool()
+    def explain_score(run_id: str, keyword: str) -> Envelope[KeywordScore | None]:
         return run_explain_score(active_settings, run_id, keyword)
 
-    @server.tool()
-    def analyze_niche(run_id: str) -> Envelope[NicheData]:
+    @tool()
+    def analyze_niche(run_id: str) -> Envelope[NicheData | None]:
         return run_niche_analyze(active_settings, run_id)
 
-    @server.tool()
-    def inspect_keyword(run_id: str, keyword: str) -> Envelope[KeywordProvenance]:
+    @tool()
+    def inspect_keyword(run_id: str, keyword: str) -> Envelope[KeywordProvenance | None]:
         return run_keyword_inspect(active_settings, run_id, keyword)
 
     return server

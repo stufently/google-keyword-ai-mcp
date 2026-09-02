@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 from google_keyword_ai.config import Settings
 from google_keyword_ai.pipeline.models import ResearchKeyword
-from google_keyword_ai.providers.trends.models import TrendsResult
+from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 
 
 class ScoreComponent(BaseModel):
@@ -54,7 +54,15 @@ def score_keyword(
     settings: Settings,
     *,
     trend_growth: float | None = None,
+    trend_source: str | None = None,
 ) -> KeywordScore:
+    """Score one keyword, naming where each component came from.
+
+    `trend_growth` is a property of the run, not of this keyword: Trends is
+    queried once per run, for a single series, and that one growth figure
+    scores every keyword. `trend_source` names the series so the explanation
+    cannot be read as this keyword's own trend.
+    """
     volume = keyword.avg_monthly_searches
     demand = (
         None
@@ -71,10 +79,17 @@ def score_keyword(
     )
 
     trend = None if trend_growth is None else 50.0 + 50.0 * _clamp(trend_growth, -1.0, 1.0)
+    series = (
+        "the run's Trends series" if trend_source is None else f"Trends series {trend_source!r}"
+    )
     trend_explanation = (
         "Trend unavailable because a comparable eight-point timeline is missing."
         if trend_growth is None
-        else f"Trend growth {trend_growth:+.2%} gives {trend:.2f}/100 within one scope."
+        else (
+            f"Trend growth {trend_growth:+.2%} from {series} gives {trend:.2f}/100 "
+            "within one scope; that one series scores every keyword in the run, "
+            "so this is not a per-keyword trend."
+        )
     )
 
     bid = (
@@ -138,10 +153,28 @@ def score_keyword(
     )
 
 
+def trend_series_keyword(trends: TrendsResult | None) -> str | None:
+    """Name the keyword whose series the growth figure describes."""
+    if trends is None or not trends.keywords:
+        return None
+    return trends.keywords[0]
+
+
+def _has_data(point: TrendPoint) -> bool:
+    """Say whether Google reported real interest for this point.
+
+    A week Google marks as having no data still arrives with a value of zero.
+    Averaging those zeros in reads "interest collapsed" from what is really
+    "we do not know", so they are dropped exactly as `parse_geo` drops regions
+    without data. An absent `hasData` predates the field and is trusted.
+    """
+    return not point.has_data or bool(point.has_data[0])
+
+
 def compute_trend_growth(trends: TrendsResult | None) -> float | None:
     if trends is None or len(trends.timeline) < 8:
         return None
-    values = [point.values[0] for point in trends.timeline if point.values]
+    values = [point.values[0] for point in trends.timeline if point.values and _has_data(point)]
     if len(values) < 8:
         return None
     quarter = len(values) // 4

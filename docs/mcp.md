@@ -55,3 +55,16 @@ is the same versioned envelope printed by the corresponding
 `gkai ... --format json` command. Planning is a separate tool so MCP never needs a
 union return type and remains shape-compatible with CLI JSON.
 
+An empty answer is still an answer. A run that does not exist, or holds no
+saved result, comes back as a normal envelope with `data: null` and a reason in
+`completeness_reason` — which is why the tools that read a saved run declare a
+nullable payload. The SDK validates a tool's return value against its declared
+type, so a type that cannot express `data: null` would turn that answer into an
+opaque failure.
+
+A request the server refuses — a limit that is not positive, an unusable date
+range, an unknown scenario — is a tool error rather than an envelope, carrying
+the same message the CLI puts in `completeness_reason`. That is the protocol's
+way to say the arguments were wrong, and it keeps the reason visible instead of
+reporting only which tool failed.
+

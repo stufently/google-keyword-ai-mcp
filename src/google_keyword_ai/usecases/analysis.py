@@ -11,7 +11,12 @@ from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.normalize import normalize_keyword
 from google_keyword_ai.pipeline.models import ResearchData, ResearchKeyword
 from google_keyword_ai.pipeline.runs import RunStore
-from google_keyword_ai.scoring import KeywordScore, compute_trend_growth, score_keyword
+from google_keyword_ai.scoring import (
+    KeywordScore,
+    compute_trend_growth,
+    score_keyword,
+    trend_series_keyword,
+)
 from google_keyword_ai.storage.engine import open_database
 
 
@@ -54,9 +59,17 @@ class KeywordProvenance(BaseModel):
     metrics: list[MetricProvenance]
 
 
-def _empty[T](reason: str, *, run_id: str | None = None) -> Envelope[T]:
+def _empty[T](reason: str, *, run_id: str | None = None) -> Envelope[T | None]:
+    """Answer with an empty envelope, which is an answer and not a failure.
+
+    A run that does not exist, or holds no saved result, is an ordinary outcome
+    with a reason worth reading. The return types say `| None` so this can
+    travel over MCP too: the SDK validates a tool's output against its declared
+    type, and a type that cannot express `data: null` turns this answer into an
+    opaque tool error.
+    """
     return cast(
-        Envelope[T],
+        Envelope[T | None],
         Envelope(
             data=None,
             completeness=Completeness.EMPTY,
@@ -87,7 +100,11 @@ def _load_research(settings: Settings, run_id: str) -> tuple[ResearchData | None
 
 def _scores(data: ResearchData, settings: Settings) -> list[KeywordScore]:
     growth = compute_trend_growth(data.trends)
-    return [score_keyword(keyword, settings, trend_growth=growth) for keyword in data.keywords]
+    source = trend_series_keyword(data.trends)
+    return [
+        score_keyword(keyword, settings, trend_growth=growth, trend_source=source)
+        for keyword in data.keywords
+    ]
 
 
 def run_score(
@@ -95,7 +112,7 @@ def run_score(
     run_id: str,
     *,
     limit: int | None = None,
-) -> Envelope[ScoredResearchData]:
+) -> Envelope[ScoredResearchData | None]:
     if limit is not None and limit <= 0:
         raise InvalidConfigurationError("Score limit must be positive.")
     research, reason = _load_research(settings, run_id)
@@ -119,7 +136,9 @@ def _find_keyword(data: ResearchData, keyword: str) -> ResearchKeyword | None:
     return next((item for item in data.keywords if item.normalized == normalized), None)
 
 
-def run_explain_score(settings: Settings, run_id: str, keyword: str) -> Envelope[KeywordScore]:
+def run_explain_score(
+    settings: Settings, run_id: str, keyword: str
+) -> Envelope[KeywordScore | None]:
     research, reason = _load_research(settings, run_id)
     if research is None:
         return _empty(reason or "Saved research data is unavailable.", run_id=run_id)
@@ -127,12 +146,17 @@ def run_explain_score(settings: Settings, run_id: str, keyword: str) -> Envelope
     if found is None:
         return _empty(f"Keyword {keyword!r} was not found in run {run_id}.", run_id=run_id)
     return Envelope(
-        data=score_keyword(found, settings, trend_growth=compute_trend_growth(research.trends)),
+        data=score_keyword(
+            found,
+            settings,
+            trend_growth=compute_trend_growth(research.trends),
+            trend_source=trend_series_keyword(research.trends),
+        ),
         run_id=run_id,
     )
 
 
-def run_cluster(settings: Settings, run_id: str) -> Envelope[list[KeywordCluster]]:
+def run_cluster(settings: Settings, run_id: str) -> Envelope[list[KeywordCluster] | None]:
     research, reason = _load_research(settings, run_id)
     if research is None:
         return _empty(reason or "Saved research data is unavailable.", run_id=run_id)
@@ -248,7 +272,7 @@ def _niche_factors(
     ]
 
 
-def run_niche_analyze(settings: Settings, run_id: str) -> Envelope[NicheData]:
+def run_niche_analyze(settings: Settings, run_id: str) -> Envelope[NicheData | None]:
     research, reason = _load_research(settings, run_id)
     if research is None:
         return _empty(reason or "Saved research data is unavailable.", run_id=run_id)
@@ -287,7 +311,7 @@ _METRIC_SOURCES = {
 
 def run_keyword_inspect(
     settings: Settings, run_id: str, keyword: str
-) -> Envelope[KeywordProvenance]:
+) -> Envelope[KeywordProvenance | None]:
     research, reason = _load_research(settings, run_id)
     if research is None:
         return _empty(reason or "Saved research data is unavailable.", run_id=run_id)

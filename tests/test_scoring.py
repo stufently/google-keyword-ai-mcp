@@ -89,16 +89,22 @@ def test_confidence_tracks_available_components(
     assert score_keyword(keyword(**values), Settings(), trend_growth=growth).confidence == expected
 
 
-def trends(values: list[int]) -> TrendsResult:
+def trends(values: list[int], *, has_data: list[bool] | None = None) -> TrendsResult:
     now = datetime.now(UTC)
+    flags = [True] * len(values) if has_data is None else has_data
     return TrendsResult(
         keywords=["alpha"],
         geo="US",
         timeframe="today 12-m",
         normalization_scope="one-scope",
         timeline=[
-            TrendPoint(timestamp=now + timedelta(days=index), formatted_time="", values=[value])
-            for index, value in enumerate(values)
+            TrendPoint(
+                timestamp=now + timedelta(days=index),
+                formatted_time="",
+                values=[value],
+                has_data=[flag],
+            )
+            for index, (value, flag) in enumerate(zip(values, flags, strict=True))
         ],
         retrieved_at=now,
         source="google_trends",
@@ -111,3 +117,36 @@ def test_growth_is_none_for_short_timeline() -> None:
 
 def test_growth_compares_last_two_quarters() -> None:
     assert compute_trend_growth(trends([1, 1, 10, 10, 20, 20, 40, 40])) == pytest.approx(1.0)
+
+
+def test_weeks_google_marks_as_having_no_data_are_not_read_as_zero_interest() -> None:
+    """A week with no data arrives as a zero, and averaging it in invents a collapse.
+
+    Google sends `hasData: [false]` with `value: [0]` for a week it could not
+    measure. Counted as a real zero it drags the latest quarter to nothing and
+    reports a total decline, which is a claim about interest rather than about
+    coverage. Too few measured points is an honest "unknown".
+    """
+    steady = [10] * 8
+    assert compute_trend_growth(trends(steady)) == pytest.approx(0.0)
+
+    blind = trends(steady, has_data=[True] * 6 + [False] * 2)
+    assert compute_trend_growth(blind) is None, "six measured points cannot fill two quarters"
+
+
+def test_the_trend_explanation_names_the_series_it_came_from() -> None:
+    """One Trends series scores every keyword, so the reader must not read it as this keyword's.
+
+    Trends is queried once per run. Reporting a bare growth figure next to a
+    keyword invites exactly the wrong reading: that the number describes that
+    keyword.
+    """
+    scored = score_keyword(
+        keyword(),
+        Settings(),
+        trend_growth=0.4,
+        trend_source="thai street food",
+    )
+    trend = next(component for component in scored.components if component.name == "trend")
+    assert "thai street food" in trend.explanation
+    assert "not a per-keyword trend" in trend.explanation

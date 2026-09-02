@@ -86,9 +86,12 @@ def test_all_five_functions_use_saved_run(tmp_path: Path) -> None:
     settings, run_id = saved_run(tmp_path)
     assert run_score(settings, run_id).completeness is Completeness.COMPLETE
     assert run_cluster(settings, run_id).completeness is Completeness.COMPLETE
-    assert run_explain_score(settings, run_id, "Alpha Keyword Tool").data.keyword
-    assert run_niche_analyze(settings, run_id).data.seed == "alpha"
-    assert run_keyword_inspect(settings, run_id, "alpha keyword tool").data.metrics
+    explained = run_explain_score(settings, run_id, "Alpha Keyword Tool").data
+    assert explained is not None and explained.keyword
+    niche = run_niche_analyze(settings, run_id).data
+    assert niche is not None and niche.seed == "alpha"
+    inspected = run_keyword_inspect(settings, run_id, "alpha keyword tool").data
+    assert inspected is not None and inspected.metrics
 
 
 def test_missing_run_is_empty_with_reason(tmp_path: Path) -> None:
@@ -108,6 +111,7 @@ def test_missing_keyword_is_empty_with_reason(tmp_path: Path, function: object) 
 def test_niche_always_has_factor_breakdown_and_excludes_unavailable(tmp_path: Path) -> None:
     settings, run_id = saved_run(tmp_path)
     result = run_niche_analyze(settings, run_id).data
+    assert result is not None
     assert len(result.factors) == 8
     assert any(not factor.available for factor in result.factors)
     available = [factor.value for factor in result.factors if factor.available]
