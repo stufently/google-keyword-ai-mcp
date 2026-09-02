@@ -121,6 +121,16 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
                 # `partial` to `complete` and then overwrite the saved result
                 # with that lie. Carry the original diagnostics forward.
                 warnings, errors = _stored_diagnostics(current, warnings, errors)
+                if current.result is None:
+                    # The run was interrupted between its last checkpoint and
+                    # the envelope, so its warnings were never written down.
+                    # The keywords survive in the checkpoints, but whatever
+                    # went wrong while collecting them is gone — say so rather
+                    # than present the leftovers as a complete result.
+                    warnings.append(
+                        "The interrupted run was restored from stage checkpoints; "
+                        "any warnings from the original attempt are unavailable."
+                    )
             envelope = _envelope_for_research(
                 data,
                 warnings,

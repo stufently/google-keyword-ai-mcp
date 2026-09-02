@@ -194,6 +194,7 @@ class RunExecutor:
         saved_by_name = {stage.name: stage for stage in record.stages}
         runnable: list[tuple[Stage, StageRecord]] = []
         reused: list[tuple[Stage, StageRecord]] = []
+        discarded: list[str] = []
         last_checkpoint_data: ResearchData | None = None
         for stage in self._stages:
             saved = saved_by_name.get(stage.name)
@@ -214,6 +215,19 @@ class RunExecutor:
                     last_checkpoint_data = checkpoint_data
                 reused.append((stage, saved))
                 continue
+            if (
+                resume
+                and version_reason is None
+                and saved is not None
+                and saved.status is StageStatus.COMPLETED
+                and saved.fingerprint != expected
+            ):
+                # The saved work answered a different question: the target,
+                # market, budget or seed keyword no longer match. Replaying is
+                # right, but doing it silently would hand back an answer to a
+                # question nobody asked. Runs stored before schema v3 land here
+                # too, because their seed keyword was never written down.
+                discarded.append(stage.name)
             prior_attempts = 0 if saved is None else saved.attempts
             runnable.append(
                 (
@@ -226,6 +240,12 @@ class RunExecutor:
                         attempts=prior_attempts,
                     ),
                 )
+            )
+
+        if discarded:
+            context.warnings.append(
+                "The request changed since this run was saved, so its checkpoints for "
+                f"{', '.join(discarded)} were discarded and the scenario ran again."
             )
 
         if not runnable:

@@ -338,6 +338,68 @@ def test_ads_candidate_pool_is_capped_by_the_call_budget(settings: Settings) -> 
     anyio.run(exercise)
 
 
+@pytest.mark.parametrize(
+    ("candidates", "expected"),
+    [(40, None), (90, "max_ads_calls")],
+)
+def test_the_ads_call_budget_is_a_cut_only_when_it_leaves_keywords_unpriced(
+    settings: Settings,
+    candidates: int,
+    expected: str | None,
+) -> None:
+    """Counting calls is not the same as noticing that keywords went unpriced.
+
+    The candidate pool is trimmed to ``max_ads_calls * 20`` before the enrichment
+    loop, so the loop is never refused a batch and cannot record the stop itself.
+    Spending the whole allowance on a pool that fits is complete; leaving fifty
+    keywords without metrics is not, and only the reason tells them apart.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        ads = FakeAds(log)
+        context = _context(
+            settings,
+            log=log,
+            expander=FakeExpander(log, _candidates(count=candidates)),
+            ads=ads,
+        )
+        context.budget_guard.budget.max_ads_calls = 2
+
+        data = await NewNicheResearch("seed").run(context)
+
+        assert [len(batch) for batch in ads.batches] == [20, 20]
+        assert data.stats.stopped_by == expected
+
+    anyio.run(exercise)
+
+
+def test_an_unavailable_ads_provider_is_not_a_budget_cut(settings: Settings) -> None:
+    """A budget that never got the chance to spend anything has cut nothing.
+
+    Without credentials the enrichment returns before making a single call, so
+    naming ``max_ads_calls`` as the reason the run stopped short points at the
+    wrong cause: the warning about the missing provider is the real one, and it
+    already makes the result partial.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        context = _context(
+            settings,
+            log=log,
+            expander=FakeExpander(log, _candidates(count=90)),
+        )
+        context.budget_guard.budget.max_ads_calls = 2
+
+        data = await NewNicheResearch("seed").run(context)
+
+        assert data.stats.stopped_by is None
+        assert data.stats.spend.ads_calls == 0
+
+    anyio.run(exercise)
+
+
 def test_relevance_fallback_is_written_into_the_caveats(settings: Settings) -> None:
     """A flag nobody can read is not a warning.
 

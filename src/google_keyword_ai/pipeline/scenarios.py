@@ -266,6 +266,17 @@ async def _enrich_ads(
     if context.google_ads is None:
         context.warnings.append("Google Ads is unavailable; absolute search metrics are omitted.")
         return
+    # Trimming here rather than at the call site keeps the caller free to hand
+    # over its whole ranked list, and puts the cut behind the availability
+    # check: a budget that never got the chance to spend anything has not cut
+    # anything either. The loop below still records a refusal, which is what
+    # catches the runtime ceiling and any ads calls already spent.
+    selected = _cap(
+        context,
+        list(selected),
+        context.budget_guard.budget.max_ads_calls * 20,
+        kind="ads",
+    )
     for start in range(0, len(selected), 20):
         batch = selected[start : start + 20]
         if not batch or not context.budget_guard.can_spend("ads"):
@@ -282,10 +293,20 @@ async def _enrich_ads(
         _apply_ideas(keywords, ideas)
 
 
-def _cap[T](context: ScenarioContext, items: list[T], limit: int) -> list[T]:
-    """Trim a list to a budget limit, recording it as a cut when it bites."""
+def _cap[T](
+    context: ScenarioContext,
+    items: list[T],
+    limit: int,
+    *,
+    kind: str = "keywords",
+) -> list[T]:
+    """Trim a list to a budget limit, recording it as a cut when it bites.
+
+    `kind` names the budget doing the trimming, because that is what the
+    result should report as the reason it stopped short.
+    """
     if len(items) > limit:
-        context.budget_guard.mark_cut("keywords")
+        context.budget_guard.mark_cut(kind)
     return items[:limit]
 
 
@@ -380,13 +401,15 @@ class NewNicheResearch:
             )
             for candidate in filtered
         ]
+        # Ranked, not trimmed: `_enrich_ads` applies the ads budget itself, so
+        # that an unavailable provider cannot be reported as a budget cut.
         selected = sorted(
             keywords,
             key=lambda keyword: (
                 keyword.autocomplete_relevance is None,
                 -(keyword.autocomplete_relevance or 0),
             ),
-        )[: context.budget_guard.budget.max_ads_calls * 20]
+        )
         await _enrich_ads(context, keywords, selected, used)
         trends = await _fetch_trends(context, self.seed, used)
         return _research_data(

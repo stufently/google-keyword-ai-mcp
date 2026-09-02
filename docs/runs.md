@@ -26,6 +26,19 @@ stale. Resuming then recomputes from scratch and adds an explanation to the
 warnings: mixing results produced by different code or parsing versions is not
 safe.
 
+A fingerprint that no longer matches means the saved work answered a different
+question. Replaying is the right response, but it is not a silent one: the
+resume warns which checkpoints were discarded, because the result it returns no
+longer matches the request the run was created from. Runs saved before schema
+v3 arrive here whenever they had a seed keyword, since theirs was never written
+down and cannot be rebuilt.
+
+A run can also be interrupted between its last saved stage and the envelope. Its
+stages then all look reusable, so the resume collects nothing — and there is no
+stored envelope to carry warnings forward from. The keywords survive in the
+checkpoints and are returned, but the result is reported as partial: whatever
+went wrong during the original attempt was never written down.
+
 `gkai run resume <id>` continues the same run. Reuse is all-or-nothing: a
 scenario is one coroutine rather than a chain of separately invocable stages, so
 the run store can skip work only when every stage is reusable. A single stale

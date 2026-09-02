@@ -412,6 +412,47 @@ def test_one_stale_stage_replays_the_whole_scenario(tmp_path: Path) -> None:
         engine.dispose()
 
 
+def test_discarded_checkpoints_say_the_request_changed(tmp_path: Path) -> None:
+    """Replaying a changed request silently answers a question nobody asked.
+
+    A fingerprint mismatch means the saved work was done for a different
+    target, market, budget or seed keyword. Replaying is right, but the caller
+    has to be told, because the result no longer matches the request the run
+    was created from. Runs saved before schema v3 land here too: their seed
+    keyword was never written down, so it cannot be rebuilt.
+    """
+    settings = Settings(data_dir=tmp_path / "changed-request")
+    engine = open_database(settings)
+    try:
+        store = RecordingStore(engine)
+        stages = [Stage(name="first", position=0, fingerprint_payload={"value": 1})]
+        record = _record(
+            settings,
+            stages,
+            statuses={"first": StageStatus.COMPLETED},
+            attempts=1,
+            checkpoint=_data().model_dump(mode="json"),
+        )
+        record.stages[0].fingerprint = "0" * 32
+        store.create(record)
+        context = _context(settings)
+        anyio.run(
+            partial(
+                RunExecutor(store, FakeScenario(), stages).execute,
+                record,
+                context,
+                resume=True,
+            )
+        )
+
+        assert context.warnings == [
+            "The request changed since this run was saved, so its checkpoints "
+            "for first were discarded and the scenario ran again."
+        ]
+    finally:
+        engine.dispose()
+
+
 def test_replay_refreshes_the_checkpoint_of_a_reused_stage(tmp_path: Path) -> None:
     """The mirror of the test above: the *first* stage is the stale one.
 

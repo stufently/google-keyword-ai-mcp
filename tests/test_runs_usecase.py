@@ -219,6 +219,47 @@ def test_resume_of_a_partial_run_keeps_its_warnings_and_stays_partial(
     assert stored.result["warnings"] == ["Google Ads was unavailable."]
 
 
+def test_resume_of_a_run_interrupted_before_its_envelope_admits_the_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Checkpoints hold the keywords but not the warnings that came with them.
+
+    A process can die after the last stage is saved and before the envelope is
+    written. The stages then all look reusable, so the resume collects nothing
+    and there is no stored envelope to carry diagnostics forward from. Calling
+    that leftover `complete` claims the original attempt went cleanly, which
+    nothing in the record supports.
+    """
+    settings = Settings(data_dir=tmp_path / "interrupted-resume")
+    engine = open_database(settings)
+    try:
+        record = _completed_record(settings)
+        record.result = None
+        RunStore(engine).create(record)
+    finally:
+        engine.dispose()
+
+    class NeverRunScenario:
+        async def run(self, context: ScenarioContext) -> ResearchData:
+            del context
+            raise AssertionError("valid stages must not be replayed")
+
+    monkeypatch.setattr(runs_module, "_live_context", _fake_live_context)
+    monkeypatch.setattr(
+        runs_module,
+        "_scenario_for_name",
+        lambda name, target, seed: NeverRunScenario(),
+    )
+    resumed = run_resume(settings, record.run_id)
+
+    assert resumed.completeness is Completeness.PARTIAL
+    assert resumed.warnings == [
+        "The interrupted run was restored from stage checkpoints; "
+        "any warnings from the original attempt are unavailable."
+    ]
+    assert resumed.data.keywords, "the checkpointed keywords are still returned"
+
+
 def test_rerun_creates_new_run_id_without_touching_original(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

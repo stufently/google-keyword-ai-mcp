@@ -30,8 +30,10 @@ candidates.
 - `max_trends_calls`: maximum Trends requests.
 - `max_runtime_seconds`: total elapsed runtime ceiling.
 
-Reaching a budget is not an error. Collected data is returned and the named limit
-appears in `stats.stopped_by`.
+Reaching a budget is not an error, and neither is spending all of it. Collected
+data is returned, and `stats.stopped_by` names a limit only when that limit
+actually cost something: an operation was refused, or a list was trimmed. A run
+that fits exactly inside its allowance is complete.
 
 `--dry-run` returns the scenario steps, source availability, and arithmetic call
 estimates without calling any provider. Use it to inspect likely cost and order.
