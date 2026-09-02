@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "CLI, MCP server and agent skill for collecting and analyzing Google search-demand data"
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     "typer>=0.27.2",
     "pydantic>=2.13.5",
@@ -24,6 +25,11 @@ all = [
     "google-api-python-client>=2.200.0",
     "google-auth-oauthlib>=1.4.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/stufently/google-keyword-ai-mcp"
+Repository = "https://github.com/stufently/google-keyword-ai-mcp"
+Changelog = "https://github.com/stufently/google-keyword-ai-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 gkai = "google_keyword_ai.cli.main:main"
@@ -52,9 +58,10 @@ addopts = "-m 'not integration'"
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
-# Milestone specs are an archive of what was asked for at the time; ruff would
-# reformat the Python snippets inside them and make the record diverge from what
-# was actually handed to the implementer.
+# Milestone specs are an archive of what was asked for at the time. `ruff format`
+# reaches into Python code blocks inside Markdown, so without this it would
+# rewrite the snippets in docs/specs and make the record diverge from what was
+# actually handed to the implementer. (`ruff check` ignores them either way.)
 extend-exclude = ["docs/specs"]
 
 [tool.ruff.lint]

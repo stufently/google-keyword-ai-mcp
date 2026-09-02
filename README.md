@@ -188,3 +188,14 @@ requires a dry run before expensive research, and preserves source caveats.
 
 This project is not affiliated with or endorsed by Google.
 Google and related product names are trademarks of their respective owners.
+
+## Documentation
+
+`docs/architecture.md` explains how the layers fit together, `docs/mcp.md` lists
+the MCP tools, `docs/privacy.md` covers what is stored and where, and the
+remaining files under `docs/` document one subsystem each. Notable changes are
+recorded in `CHANGELOG.md`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

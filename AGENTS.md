@@ -22,7 +22,7 @@ docker run --rm -v "$PWD":/app -w /app --user "$(id -u):$(id -g)" \
 ```
 
 Меняя последнюю строку, получаешь остальные: `ruff check .`,
-`ruff format --check src tests`, `mypy`, `gkai --help`.
+`ruff format --check .`, `mypy`, `gkai --help`.
 
 ⚠️ `--all-extras` обязателен: без него `uv run` ставит только основные
 зависимости, а тесты провайдеров Google Ads и Search Console падают на сборе
@@ -36,11 +36,17 @@ docker run --rm -v "$PWD":/app -w /app --user "$(id -u):$(id -g)" \
   -e UV_CACHE_DIR=/app/.uv-cache -e HOME=/tmp \
   ghcr.io/astral-sh/uv:python3.14-bookworm-slim \
   bash -c 'uv sync --all-extras -q && uv run ruff check . \
-    && uv run ruff format --check src tests && uv run mypy && uv run pytest -q'
+    && uv run ruff format --check . && uv run mypy && uv run pytest -q'
 ```
 
 CI гоняет то же самое на 3.12 и 3.14 (`.github/workflows/ci.yml`), поэтому
 код обязан работать на обеих: нижняя граница объявлена в `requires-python`.
+
+⚠️ Проверяя обе версии подряд, давай каждой СВОЁ окружение и свой кеш
+(`-e UV_PROJECT_ENVIRONMENT=/tmp/venv312 -e UV_CACHE_DIR=/app/.uv-cache-312`).
+Один общий `.venv` на два интерпретатора даёт полсотни падений в тестах,
+которые выглядят как настоящая несовместимость с 3.12, а на деле это
+перемешанное окружение: в изоляции те же тесты зелены.
 
 ## Чего делать нельзя
 
