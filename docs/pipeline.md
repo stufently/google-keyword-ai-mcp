@@ -1,6 +1,6 @@
 # Research pipeline
 
-M7 provides three research scenarios because their useful first source differs.
+There are three research scenarios because their useful first source differs.
 A new niche starts with broad Autocomplete expansion; a competitor starts with
 Google Ads site or URL ideas; an existing site starts with its own Search Console
 queries and opportunities. Forcing one linear pipeline onto all three would either
@@ -43,10 +43,13 @@ estimates without calling any provider. Use it to inspect likely cost and order.
 by meaning. `caveats` records interpretation limits and fallback sorting. Missing
 optional credentials produce warnings and a partial result, not a crash.
 
-- значения Trends 0–100 — не объём поиска
-- `ads_competition` — не SEO-сложность
-- site seed даёт «идеи ключей, которые Google связывает с сайтом», а не
-  «запросы, по которым сайт ранжируется»
+The standing caveats are:
 
-Research runs are not saved yet; persistence arrives in M8. Scoring and clustering
-are not part of these flat keyword lists and arrive in M9.
+- Trends values are 0-100 relative interest, not search volume.
+- `ads_competition` is advertiser competition, not SEO difficulty.
+- A site seed yields keyword ideas Google associates with the site, not the
+  queries the site actually ranks for.
+
+Pass `--save-run` to persist a run and revisit it later; see [runs](runs.md).
+Scoring and clustering are applied to a saved run rather than to these flat
+keyword lists; see [scoring](scoring.md).

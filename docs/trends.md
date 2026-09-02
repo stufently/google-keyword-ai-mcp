@@ -1,52 +1,52 @@
 # Google Trends
 
-Google Trends подключён через неофициальный HTTP-адаптер без сторонних
-обёрток. Официальный API находится в закрытой alpha, поэтому доступа к нему
-нет; `OfficialTrendsAdapter` только резервирует место для будущей интеграции.
+Google Trends is reached through an unofficial HTTP adapter with no third-party
+wrappers. An official API exists but is in closed alpha with application-gated
+access, so this project has none; `OfficialTrendsAdapter` only reserves the seam
+for a future integration.
 
-## Как выполняется запрос
+## How a request is performed
 
-Адаптер использует цепочку из трёх шагов:
+The adapter uses a three-step chain:
 
-1. `GET /_/TrendsUi/data/batchexecute` прогревает сессию и получает cookie
-   `NID`. Ожидаемый ответ здесь — HTTP 405: метод запрещён, но cookie уже
-   установлена, поэтому такой ответ считается успехом.
-2. `GET /trends/api/explore` возвращает описания доступных виджетов, их
-   запросы и токены.
-3. `GET /trends/api/widgetdata/*` последовательно загружает временной ряд,
-   географию и связанные запросы. Между виджетами выдерживается настроенная
-   пауза.
+1. `GET /_/TrendsUi/data/batchexecute` warms up the session and obtains the
+   `NID` cookie. The expected response here is HTTP 405: the method is not
+   allowed, but the cookie is already set, so that response counts as success.
+2. `GET /trends/api/explore` returns the descriptions of the available widgets
+   together with their requests and tokens.
+3. `GET /trends/api/widgetdata/*` loads the time series, the geography and the
+   related queries in turn. A configured pause is held between widgets.
 
-`explore` начинает тело с `)]}'` и перевода строки, а `widgetdata` — с
-`)]}',` и перевода строки. Парсер снимает общий маркер и отбрасывает всё до
-первого JSON-объекта; фиксированный срез строки не используется.
+`explore` starts its body with `)]}'` and a newline, while `widgetdata` starts
+with `)]}',` and a newline. The parser strips the common marker and discards
+everything before the first JSON object; no fixed-length slice is used.
 
-Сбой одного виджета даёт частичный результат с предупреждением. Сбой
-прогрева или `explore` завершает весь запрос. После заданного числа таких
-последовательных сбоев размыкатель немедленно отклоняет новые вызовы, чтобы
-не усиливать блокировку и не тратить время на заведомо неуспешную сеть.
+A failure of one widget yields a partial result with a warning. A failure of the
+warm-up or of `explore` fails the whole request. After a configured number of
+such consecutive failures the circuit breaker rejects new calls immediately, so
+as not to deepen the block or waste time on a network that is bound to fail.
 
-## Нормализация и сравнение
+## Normalization and comparison
 
-Значения 0–100 нормализуются только внутри одного запроса: 100 означает
-максимум именно в этом ответе. Результаты отдельных запросов напрямую
-сравнивать нельзя. Команда `gkai trends compare` и MCP-инструмент
-`analyze_trends` передают до пяти ключей одним запросом.
+The 0-100 values are normalized only within a single request: 100 means the
+maximum in that particular response. Results of separate requests cannot be
+compared directly. The `gkai trends compare` command and the `analyze_trends`
+MCP tool send up to five keywords in one request.
 
-`normalization_scope` — первые 16 символов SHA-256 от канонического JSON с
-ключами, страной, периодом и языком. Одинаковые параметры дают одинаковый
-scope; разные параметры — другой. Сопоставлять числовые значения безопасно
-только при одинаковом scope.
+`normalization_scope` is the first 16 characters of the SHA-256 of canonical
+JSON containing the keywords, country, timeframe and language. Identical
+parameters produce an identical scope, different parameters a different one.
+Comparing numeric values is safe only within the same scope.
 
-## Настройки
+## Settings
 
-Неофициальный провайдер включён по умолчанию. Его можно выключить kill
-switch'ем:
+The unofficial provider is enabled by default. It can be turned off with a kill
+switch:
 
 ```bash
 export GKAI_TRENDS_ENABLED=false
 ```
 
-Пауза, TTL кеша, порог размыкателя и часовой пояс задаются параметрами
+The pause, cache TTL, circuit-breaker threshold and timezone are set by
 `trends_pacing_seconds`, `trends_cache_ttl_seconds`,
-`trends_circuit_breaker_failures` и `trends_timezone_minutes`.
+`trends_circuit_breaker_failures` and `trends_timezone_minutes`.

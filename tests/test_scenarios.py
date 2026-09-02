@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 
 import anyio
+import pytest
 
 from google_keyword_ai.config import Settings
 from google_keyword_ai.expansion import ExpansionStrategy
@@ -26,9 +27,15 @@ from google_keyword_ai.providers.trends.models import TrendsResult
 
 
 class FakeExpander:
-    def __init__(self, log: list[str], candidates: list[KeywordCandidate]) -> None:
+    def __init__(
+        self,
+        log: list[str],
+        candidates: list[KeywordCandidate],
+        stopped_by: str | None = None,
+    ) -> None:
         self.log = log
         self.candidates = candidates
+        self.stopped_by = stopped_by
 
     async def expand(
         self,
@@ -39,7 +46,9 @@ class FakeExpander:
     ) -> tuple[list[KeywordCandidate], ExpansionStats]:
         del seed, market, strategies
         self.log.append("autocomplete")
-        return self.candidates, ExpansionStats(queries_executed=3, depth_reached=0)
+        return self.candidates, ExpansionStats(
+            queries_executed=3, depth_reached=0, stopped_by=self.stopped_by
+        )
 
 
 class FakeAds:
@@ -343,5 +352,38 @@ def test_relevance_fallback_is_written_into_the_caveats(settings: Settings) -> N
 
         assert RELEVANCE_SORT_CAVEAT
         assert RELEVANCE_SORT_CAVEAT in data.data_quality.caveats
+
+    anyio.run(exercise)
+
+
+@pytest.mark.parametrize(
+    ("expansion_stop", "expected"),
+    [
+        ("max_depth", None),
+        ("max_queries", "max_autocomplete_queries"),
+        ("max_results", "max_keywords"),
+        ("max_runtime", "max_runtime_seconds"),
+    ],
+)
+def test_only_budget_stops_mark_a_research_run_cut_short(
+    settings: Settings, expansion_stop: str, expected: str | None
+) -> None:
+    """Reaching the requested fan-out depth is an ordinary finish, not a budget cut.
+
+    Propagating it made every healthy run partial, so `gkai research` and
+    `gkai run resume` exited 1 on success. docs/expansion.md states the contract.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        context = _context(
+            settings,
+            log=log,
+            expander=FakeExpander(log, _candidates(), stopped_by=expansion_stop),
+        )
+
+        data = await NewNicheResearch("seed").run(context)
+
+        assert data.stats.stopped_by == expected
 
     anyio.run(exercise)

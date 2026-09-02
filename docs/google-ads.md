@@ -1,43 +1,47 @@
 # Google Ads Keyword Planner
 
-Провайдер Google Ads опционален: без полного набора credentials остальные
-источники продолжают работать, а `gkai doctor` показывает
-`missing credentials`.
+The Google Ads provider is optional: without the full set of credentials the
+other sources keep working and `gkai doctor` reports `missing credentials`.
 
-Нужны developer token, customer ID, OAuth client ID, client secret и refresh
-token. Их получают в Google Ads API Center и Google Cloud Console. Для MCC
-можно дополнительно указать login customer ID. Настройки передаются через
-поля `google_ads_*` либо переменные окружения `GKAI_GOOGLE_ADS_*`.
+You need a developer token, a customer ID, an OAuth client ID, a client secret
+and a refresh token. They are obtained from the Google Ads API Center and the
+Google Cloud Console. For an MCC you may additionally supply a login customer
+ID. Settings are passed through the `google_ads_*` fields or the
+`GKAI_GOOGLE_ADS_*` environment variables.
 
-Keyword Planner поддерживает четыре взаимоисключающих seed-режима:
+Keyword Planner supports four mutually exclusive seed modes:
 
-- `keyword_seed` — один или несколько ключей;
-- `url_seed` — URL страницы;
-- `keyword_and_url_seed` — ключи вместе с URL;
-- `site_seed` — сайт целиком.
+- `keyword_seed` — one or more keywords;
+- `url_seed` — the URL of a page;
+- `keyword_and_url_seed` — keywords together with a URL;
+- `site_seed` — a whole site.
 
-Заполняется ровно один режим: `site_seed` нельзя сочетать с ключами или URL.
+Exactly one mode is filled in: `site_seed` cannot be combined with keywords or
+a URL.
 
-Ставки API приходят в micros и перед выдачей делятся на 1 000 000. В ответе
-остаются только значения в единицах валюты, без полей с суффиксом `_micros`.
+API bids arrive in micros and are divided by 1,000,000 before being returned.
+Only currency-unit values remain in the response; no `_micros` fields are
+exposed.
 
-Keyword Planning API ограничен примерно одним запросом в секунду на customer
-ID. CLI и MCP работают в разных процессах, поэтому общий лимит соблюдается
-межпроцессной файловой блокировкой, а не локальным семафором.
+The Keyword Planning API is limited to roughly one request per second per
+customer ID. The CLI and the MCP server run in different processes, so the
+shared limit is enforced with an interprocess file lock rather than a local
+semaphore.
 
-Идеи кешируются на неделю, исторические метрики — на 30 суток: последние
-обновляются Google примерно раз в месяц. Ключ кеша включает customer ID, чтобы
-аккаунты не видели данные друг друга.
+Ideas are cached for a week and historical metrics for 30 days, because Google
+refreshes the latter about once a month. The cache key includes the customer
+ID so that accounts never see each other's data.
 
-Criteria ID стран взяты из официального `geotargets-2026-08-12.csv`, а ID
-языков — со страницы Google Ads `codes-formats`; данные сняты 2026-09-02.
-Проектный код `zh` сопоставлен с `zh_CN` (1017). Казахского `kk` в Google Ads
-нет, поэтому этот рынок отклоняется без подстановки похожего ID.
+Country criteria IDs come from the official `geotargets-2026-08-12.csv`, and
+language IDs from the Google Ads `codes-formats` page; both were captured on
+2026-09-02. The project code `zh` is mapped to `zh_CN` (1017). Google Ads has
+no Kazakh `kk`, so that market is rejected rather than substituted with a
+similar ID.
 
-Важно:
+Keep in mind:
 
-- `ads_competition` — рекламная конкуренция, а не SEO-сложность;
-- site seed даёт идеи ключей, которые Google связывает с сайтом, а не запросы,
-  по которым сайт ранжируется;
-- Google округляет объёмы и объединяет близкие варианты, поэтому объём — не
-  точный счётчик запросов.
+- `ads_competition` is advertiser competition, not SEO difficulty;
+- a site seed yields keyword ideas Google associates with the site, not the
+  queries the site ranks for;
+- Google rounds volumes and merges close variants, so volume is not an exact
+  request counter.

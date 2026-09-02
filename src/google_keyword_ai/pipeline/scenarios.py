@@ -27,6 +27,18 @@ from google_keyword_ai.providers.search_console import SearchAnalyticsPage, Site
 from google_keyword_ai.providers.trends.models import TrendsResult
 
 # The three standing prohibitions, in the language the rest of the output uses.
+# Expansion budget names, translated to the research budget option that caused
+# the stop. "max_depth" is deliberately absent: reaching the requested fan-out
+# depth is the ordinary end of expansion, not a budget cut, and propagating it
+# would mark every healthy run partial and make the exit code useless. This is
+# the contract documented in docs/expansion.md and already honoured by
+# usecases/expand.py.
+_EXPANSION_STOP_TO_BUDGET = {
+    "max_queries": "max_autocomplete_queries",
+    "max_results": "max_keywords",
+    "max_runtime": "max_runtime_seconds",
+}
+
 TRENDS_CAVEAT = "Google Trends values are relative interest on a 0-100 scale, not search volume."
 ADS_CAVEAT = "Google Ads competition describes advertiser demand, not SEO difficulty."
 SITE_SEED_CAVEAT = (
@@ -286,11 +298,7 @@ def _research_data(
     relevance_fallback = _sort_keywords(keywords)
     stopped_by = context.budget_guard.exhausted_reason()
     if expansion is not None and expansion.stopped_by is not None:
-        stopped_by = {
-            "max_queries": "max_autocomplete_queries",
-            "max_results": "max_keywords",
-            "max_runtime": "max_runtime_seconds",
-        }.get(expansion.stopped_by, expansion.stopped_by)
+        stopped_by = _EXPANSION_STOP_TO_BUDGET.get(expansion.stopped_by, stopped_by)
     return ResearchData(
         scenario=scenario,
         input=input_value,
