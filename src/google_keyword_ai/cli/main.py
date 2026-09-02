@@ -6,8 +6,10 @@ import typer
 
 from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
+from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
+from google_keyword_ai.usecases.expand import run_expand
 from google_keyword_ai.usecases.suggest import run_suggest
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -74,6 +76,41 @@ def suggest(
             query,
             language=language,
             country=country,
+            limit=limit,
+        ),
+        output_format,
+    )
+
+
+@app.command()
+def expand(
+    seed: str,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    depth: Annotated[int | None, typer.Option("--depth")] = None,
+    max_queries: Annotated[int | None, typer.Option("--max-queries")] = None,
+    max_results: Annotated[int | None, typer.Option("--max-results")] = None,
+    max_runtime_seconds: Annotated[float | None, typer.Option("--max-runtime")] = None,
+    strategies: Annotated[
+        list[ExpansionStrategy] | None,
+        typer.Option("--strategy"),
+    ] = None,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_expand(
+            settings,
+            seed,
+            language=language,
+            country=country,
+            depth=depth,
+            max_queries=max_queries,
+            max_results=max_results,
+            max_runtime_seconds=max_runtime_seconds,
+            strategies=strategies,
             limit=limit,
         ),
         output_format,

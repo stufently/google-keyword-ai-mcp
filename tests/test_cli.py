@@ -13,10 +13,15 @@ from typer.testing import CliRunner
 
 from google_keyword_ai.cli import main as cli_main
 from google_keyword_ai.config import Settings
-from google_keyword_ai.envelope import Completeness
+from google_keyword_ai.envelope import Completeness, Envelope
+from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
+from google_keyword_ai.providers.base import ProviderInfo
+from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
 from google_keyword_ai.usecases.doctor import run_doctor
+from google_keyword_ai.usecases.expand import ExpandData
 
 
 def run_cli(
@@ -177,3 +182,86 @@ def test_third_party_logs_go_to_stderr_not_stdout(tmp_path: Path) -> None:
     assert all(getattr(handler, "stream", sys.stderr) is sys.stderr for handler in handlers), (
         "every handler must write to stderr"
     )
+
+
+def test_expand_prints_json_envelope_and_forwards_options(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(data_dir=tmp_path / "expand-data")
+    captured: dict[str, object] = {}
+
+    def fake_run_expand(
+        active_settings: Settings,
+        seed: str,
+        **kwargs: object,
+    ) -> Envelope[ExpandData]:
+        captured.update(kwargs)
+        captured["settings"] = active_settings
+        captured["seed"] = seed
+        return Envelope(
+            data=ExpandData(
+                seed=seed,
+                language="en",
+                country="US",
+                provider=ProviderInfo(
+                    name="autocomplete",
+                    official=False,
+                    stability="unofficial",
+                ),
+                strategies=["digits", "modifiers"],
+                limits=ExpansionLimits(
+                    max_depth=2,
+                    max_queries=20,
+                    max_results=30,
+                    max_runtime_seconds=4,
+                ),
+                stats=ExpansionStats(queries_executed=3, depth_reached=1),
+                keywords=[
+                    KeywordCandidate(
+                        raw="seed one",
+                        normalized="seed one",
+                        discovered_from=["autocomplete:digits:seed 1"],
+                    )
+                ],
+            )
+        )
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_expand", fake_run_expand)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "expand",
+            "seed",
+            "--language",
+            "en",
+            "--country",
+            "US",
+            "--depth",
+            "2",
+            "--max-queries",
+            "20",
+            "--max-results",
+            "30",
+            "--max-runtime",
+            "4",
+            "--strategy",
+            "digits",
+            "--strategy",
+            "modifiers",
+            "--limit",
+            "1",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload: dict[str, Any] = json.loads(result.stdout)
+    assert payload["data"]["keywords"][0]["normalized"] == "seed one"
+    assert captured["seed"] == "seed"
+    assert captured["strategies"] == [
+        ExpansionStrategy.DIGITS,
+        ExpansionStrategy.MODIFIERS,
+    ]
+    assert captured["max_runtime_seconds"] == 4.0

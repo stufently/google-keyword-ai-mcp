@@ -5,6 +5,7 @@ from google_keyword_ai.config import Settings, load_settings
 from google_keyword_ai.envelope import Envelope
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
+from google_keyword_ai.usecases.expand import ExpandData, run_expand
 from google_keyword_ai.usecases.suggest import SuggestData, run_suggest
 
 
@@ -31,6 +32,31 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             query,
             language=language,
             country=country,
+            limit=limit,
+        )
+
+    @server.tool()
+    def expand_keywords(
+        seed: str,
+        language: str | None = None,
+        country: str | None = None,
+        depth: int | None = None,
+        max_queries: int | None = None,
+        max_results: int | None = None,
+        max_runtime_seconds: float | None = None,
+        strategies: list[str] | None = None,
+        limit: int | None = None,
+    ) -> Envelope[ExpandData]:
+        return run_expand(
+            active_settings,
+            seed,
+            language=language,
+            country=country,
+            depth=depth,
+            max_queries=max_queries,
+            max_results=max_results,
+            max_runtime_seconds=max_runtime_seconds,
+            strategies=strategies,
             limit=limit,
         )
 

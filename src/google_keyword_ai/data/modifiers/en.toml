@@ -1,0 +1,14 @@
+[informational]
+prefix = ["how", "what", "why", "where", "which"]
+suffix = ["guide", "tutorial", "instructions", "how it works"]
+
+[commercial]
+prefix = ["buy", "order"]
+suffix = ["price", "cost", "reviews", "cheap", "rating"]
+
+[comparison]
+suffix = ["or", "vs", "comparison", "alternative", "best"]
+
+[transactional]
+prefix = ["order"]
+suffix = ["near me", "delivery", "online", "same day"]
