@@ -3,7 +3,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, Self
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from google_keyword_ai import __version__
@@ -249,7 +249,22 @@ def load_settings(cwd: Path | None = None) -> Settings:
     values = _read_toml(_user_config_path())
     values.update(_read_toml(working_directory / ".gkai.toml"))
     values.update(_environment_values())
-    return Settings.model_validate(values)
+    try:
+        return Settings.model_validate(values)
+    except ValidationError as exc:
+        # A setting of the wrong type is a refused configuration like any
+        # other, and both facades already know how to report one of those. A
+        # bare `ValidationError` instead reaches the caller as a crash. The
+        # offending values are left out on purpose: one of them may be a token.
+        raise InvalidConfigurationError(_validation_message(exc)) from exc
+
+
+def _validation_message(exc: ValidationError) -> str:
+    complaints = [
+        f"{'.'.join(str(part) for part in error['loc']) or 'settings'}: {error['msg']}"
+        for error in exc.errors()
+    ]
+    return "Configuration is invalid. " + "; ".join(complaints) + "."
 
 
 def masked_dump(settings: Settings) -> dict[str, object]:

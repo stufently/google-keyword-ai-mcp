@@ -13,7 +13,8 @@ Every command prints its envelope to stdout and then exits according to
   `completeness_reason`, `warnings` and `errors` to see what is missing.
   Absent optional credentials and exhausted budgets land here, and so does a
   value the command refuses (a limit of zero, an unusable date range, an
-  unknown scenario): the reason is in the envelope, not on stderr.
+  unknown scenario) or an unusable setting in `.gkai.toml` or the environment:
+  the reason is in the envelope, not on stderr.
 - `2` — the command line itself was rejected by the parser (unknown option,
   wrong number of arguments). Nothing ran and no envelope was produced.
 

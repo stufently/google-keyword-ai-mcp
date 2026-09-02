@@ -1,4 +1,5 @@
 import json
+import sys
 from collections.abc import Callable
 from enum import StrEnum
 from typing import Annotated, cast
@@ -531,7 +532,19 @@ def run_rerun_command(
 
 
 def main() -> None:
-    app()
+    """Run the CLI, keeping the envelope promise ahead of any command.
+
+    Loading settings and configuring logging happen before a command builds its
+    envelope, and both can refuse an unusable configuration. Letting that
+    escape exits 1 with an empty stdout and a traceback, which is exactly what
+    the documented exit codes tell a caller cannot happen. No command has run
+    at this point, so the envelope is printed as JSON, the documented default.
+    """
+    try:
+        app()
+    except GkaiError as exc:
+        typer.echo(json.dumps(_error_envelope(exc).to_wire(), ensure_ascii=False))
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -191,3 +191,62 @@ def test_the_error_guard_leaves_the_published_schemas_alone(
     assert output["properties"]["data"]["anyOf"][-1] == {"type": "null"}, (
         "the published schema has to admit the empty answer the tool can return"
     )
+
+
+@pytest.mark.parametrize(
+    ("variable", "value", "fragment"),
+    [
+        ("GKAI_LOG_LEVEL", "invalid", "Unknown log level: invalid."),
+        ("GKAI_HTTP_MAX_ATTEMPTS", "abc", "http_max_attempts"),
+        ("GKAI_HTTP_MAX_ATTEMPTS", "0", "http_max_attempts must be at least 1."),
+    ],
+)
+def test_an_unusable_configuration_is_reported_in_the_envelope_too(
+    tmp_path: Path, variable: str, value: str, fragment: str
+) -> None:
+    """Settings load before any command builds its envelope, and can refuse.
+
+    Reading the configuration and configuring logging both happen ahead of the
+    command, so an error there used to escape the guard entirely and exit 1
+    with nothing on stdout. A value of the wrong type arrives as a pydantic
+    error rather than one of ours, which is the same contract break wearing a
+    different exception.
+    """
+    environment = os.environ.copy()
+    environment["GKAI_DATA_DIR"] = str(tmp_path)
+    environment[variable] = value
+    completed = subprocess.run(
+        [sys.executable, "-m", "google_keyword_ai.cli.main", "doctor"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert completed.returncode == 1, completed.stderr
+    assert "Traceback" not in completed.stderr
+    envelope = cast(dict[str, object], json.loads(completed.stdout))
+    assert envelope["completeness"] == "empty"
+    assert fragment in cast(str, envelope["completeness_reason"])
+
+
+def test_an_unusable_configuration_never_echoes_the_value_it_rejected(
+    tmp_path: Path,
+) -> None:
+    """A rejected setting can be a credential, so the message names the field only."""
+    environment = os.environ.copy()
+    environment["GKAI_DATA_DIR"] = str(tmp_path)
+    environment["GKAI_GOOGLE_ADS_DEVELOPER_TOKEN"] = "s3cret-token"
+    environment["GKAI_HTTP_MAX_ATTEMPTS"] = "not-a-number"
+    completed = subprocess.run(
+        [sys.executable, "-m", "google_keyword_ai.cli.main", "doctor"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert completed.returncode == 1
+    assert "s3cret-token" not in completed.stdout
+    assert "s3cret-token" not in completed.stderr
+    assert "not-a-number" not in completed.stdout

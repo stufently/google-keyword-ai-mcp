@@ -35,9 +35,14 @@ Trend growth compares the mean of the last quarter of a timeline with the
 previous quarter. It requires at least eight points and uses `values[0]` from
 one Trends response. Values are comparable only inside that response's single
 `normalization_scope`; values from different requests must never be compared.
-Points Google marks as having no data are dropped rather than read as zero
-interest: a week that could not be measured is not a week of no demand, and
-averaging those zeros in would report a collapse that never happened.
+The two windows are cut from the timeline by position, before anything is
+dropped, because a position in this series is a week on the calendar. A week
+Google marks as having no data arrives with a value of zero; averaging it in
+would report a collapse that never happened, but discarding it before the
+windows are cut is worse still — both windows slide backwards and the answer
+describes an older period while claiming to be the recent trend. A window
+therefore has to be measured in full to stand for its quarter, and a year whose
+last months could not be measured reports no trend at all.
 
 The trend component belongs to the run, not to the keyword next to it. Trends
 is queried once per run, for a single series, and that one growth figure scores

@@ -160,30 +160,42 @@ def trend_series_keyword(trends: TrendsResult | None) -> str | None:
     return trends.keywords[0]
 
 
-def _has_data(point: TrendPoint) -> bool:
+def _is_measured(point: TrendPoint) -> bool:
     """Say whether Google reported real interest for this point.
 
     A week Google marks as having no data still arrives with a value of zero.
-    Averaging those zeros in reads "interest collapsed" from what is really
-    "we do not know", so they are dropped exactly as `parse_geo` drops regions
-    without data. An absent `hasData` predates the field and is trusted.
+    Reading that zero as real interest turns "we do not know" into "interest
+    collapsed". An absent `hasData` predates the field and is trusted.
     """
-    return not point.has_data or bool(point.has_data[0])
+    return bool(point.values) and (not point.has_data or bool(point.has_data[0]))
 
 
 def compute_trend_growth(trends: TrendsResult | None) -> float | None:
+    """Compare the mean of the last quarter of a timeline with the one before it.
+
+    The two windows are cut from the timeline by POSITION, before any point is
+    discarded, because a position in this series is a week on the calendar.
+    Dropping the unmeasured weeks first would slide both windows backwards and
+    silently answer a question about an older period: a year whose last two
+    months Google could not measure would report the growth of the two quarters
+    that preceded them as the recent trend.
+
+    A window therefore has to be measured in full to stand for its quarter.
+    Anything less is reported as no trend at all, which is the honest answer
+    when the recent period is the part that is missing.
+    """
     if trends is None or len(trends.timeline) < 8:
         return None
-    values = [point.values[0] for point in trends.timeline if point.values and _has_data(point)]
-    if len(values) < 8:
-        return None
-    quarter = len(values) // 4
+    timeline = trends.timeline
+    quarter = len(timeline) // 4
     if quarter == 0:
         return None
-    latest = values[-quarter:]
-    previous = values[-2 * quarter : -quarter]
-    previous_average = sum(previous) / len(previous)
-    latest_average = sum(latest) / len(latest)
+    latest = timeline[-quarter:]
+    previous = timeline[-2 * quarter : -quarter]
+    if not all(_is_measured(point) for point in (*latest, *previous)):
+        return None
+    previous_average = sum(point.values[0] for point in previous) / len(previous)
+    latest_average = sum(point.values[0] for point in latest) / len(latest)
     if previous_average == 0:
         return None
     return (latest_average - previous_average) / previous_average

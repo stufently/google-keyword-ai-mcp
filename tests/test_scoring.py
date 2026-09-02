@@ -131,7 +131,25 @@ def test_weeks_google_marks_as_having_no_data_are_not_read_as_zero_interest() ->
     assert compute_trend_growth(trends(steady)) == pytest.approx(0.0)
 
     blind = trends(steady, has_data=[True] * 6 + [False] * 2)
-    assert compute_trend_growth(blind) is None, "six measured points cannot fill two quarters"
+    assert compute_trend_growth(blind) is None, "the latest quarter was never measured"
+
+
+def test_unmeasured_weeks_do_not_slide_the_comparison_onto_an_older_period() -> None:
+    """Dropping points before cutting the windows answers about the wrong months.
+
+    A position in this series is a week on the calendar. Filtering first and
+    then taking "the last quarter" of what survives compares two quarters that
+    both ended before the gap, and presents the result as the recent trend. A
+    year whose last two months Google could not measure has no recent trend to
+    report, and saying so is the only honest answer.
+    """
+    # 52 weeks make a quarter of 13, so the last 13 are the window in question.
+    values = [10] * 39 + [90] * 13
+    measured_everywhere = trends(values)
+    assert compute_trend_growth(measured_everywhere) == pytest.approx(8.0)
+
+    recent_months_blind = trends(values, has_data=[True] * 39 + [False] * 13)
+    assert compute_trend_growth(recent_months_blind) is None
 
 
 def test_the_trend_explanation_names_the_series_it_came_from() -> None:
