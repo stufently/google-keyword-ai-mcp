@@ -282,6 +282,39 @@ def test_truncation_cap_counts_across_days_not_per_day(tmp_path: Path) -> None:
     assert len(service.calls) == 2
 
 
+def test_a_range_that_ends_exactly_on_the_cap_is_complete(tmp_path: Path) -> None:
+    """Spending the whole cap is not the same as being cut off by it.
+
+    The counter reaching the cap on the final short page of the final day means
+    the range was read in full and the budget happened to fit. Reporting that
+    as truncated makes the run partial and sends the caller hunting for rows
+    that were never withheld.
+    """
+    first = _row()
+    first["keys"] = ["day-one"]
+    second = _row()
+    second["keys"] = ["day-two"]
+    service = FakeService([{"rows": [first]}, {"rows": [second]}])
+    settings = _settings(tmp_path, search_console_daily_row_cap=2)
+    provider, engine = _provider(settings, service)
+    try:
+        result = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 2),
+            dimensions=["query"],
+            row_limit=10,
+        )
+    finally:
+        engine.dispose()
+
+    assert result.truncated is False
+    assert result.truncation_reason is None
+    assert [row.keys["query"] for row in result.rows] == ["day-one", "day-two"]
+    assert len(service.calls) == 2
+
+
 def _http_error(status: int) -> HttpError:
     return HttpError(SimpleNamespace(status=status, reason="test"), b"{}")
 

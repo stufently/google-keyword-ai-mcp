@@ -23,9 +23,11 @@ therefore requests each day separately and pages within that day using
 
 About 50,000 rows per property, search type, and day is an upper bound on what
 the API exposes, not a guarantee that the response is complete. When collection
-reaches the configured daily cap, `truncated` is `true`, `truncation_reason`
-explains which boundary was reached, and the envelope has `completeness` set to
-`partial`. Consumers must not treat such a result as a complete export.
+reaches the configured daily cap *and rows remained to read*, `truncated` is
+`true`, `truncation_reason` explains which boundary was reached, and the
+envelope has `completeness` set to `partial`. Consumers must not treat such a
+result as a complete export. A range whose last row happens to land exactly on
+the cap was read in full and stays complete: the cap was spent, not hit.
 
 Search Console data for the newest days can still be incomplete. Default query
 windows therefore end on the day before yesterday, not today or yesterday.

@@ -367,7 +367,13 @@ class SearchConsoleProvider(Provider):
                 )
                 all_rows.extend(page_rows)
                 rows_fetched += len(page_rows)
-                if rows_fetched >= self._settings.search_console_daily_row_cap:
+                # A full page means another may follow; a short one ends the day.
+                more_to_read = len(page_rows) == page_size or current_day < end
+                # Spending the whole cap is only a truncation if it stopped work
+                # that remained. A range whose last row happens to land exactly
+                # on the cap was read in full, and calling that incomplete
+                # sends the caller looking for data that does not exist.
+                if rows_fetched >= self._settings.search_console_daily_row_cap and more_to_read:
                     truncated = True
                     truncation_reason = (
                         "Search Console daily row cap of "
