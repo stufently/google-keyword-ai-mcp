@@ -1,0 +1,547 @@
+# google-keyword-ai-mcp — дизайн
+
+Дата: 2026-09-02
+Статус: утверждён владельцем, готов к разбиению на вехи
+
+## Что это
+
+Инструмент исследования поискового спроса Google: программный аналог части
+возможностей Яндекс Wordstat, собирающий данные из нескольких источников Google
+сразу. Поставляется тремя интерфейсами поверх одного ядра — CLI, MCP-сервер и
+Claude Skill.
+
+Не веб-приложение. Не сервис. Локальный инструмент с локальной БД.
+
+### Главное правило проекта
+
+Цель — не подключить максимум API, а получить максимум полезной SEO-информации
+при минимальной стоимости и минимальном числе внешних запросов. Порядок обращения
+к источникам фиксирован:
+
+```
+cache → free/local → Autocomplete → dedupe/filter → Google Ads → Trends → optional expensive
+```
+
+## Имена
+
+Переименованию не подлежат без веской технической причины.
+
+| Сущность | Имя |
+|---|---|
+| Репозиторий | `google-keyword-ai-mcp` |
+| Python-пакет | `google_keyword_ai` |
+| CLI | `gkai` |
+| MCP-сервер | `google-keyword-ai` (stdio) |
+| Claude Skill | `researching-google-keywords` |
+| Путь скила | `.claude/skills/researching-google-keywords/SKILL.md` |
+| Префикс env | `GKAI_` |
+
+`mcp` есть в имени репозитория, но нет в имени пакета сознательно: MCP — это
+транспорт, а не суть библиотеки.
+
+## Архитектура
+
+### Три слоя, логика только в нижнем
+
+```
+        Claude Skill (researching-google-keywords)
+                        │ оркестрация, интерпретация
+        ┌───────────────┴───────────────┐
+        │                               │
+   CLI (gkai)                  MCP server (google-keyword-ai)
+        │  парсинг аргументов + сериализация, без логики
+        └───────────────┬───────────────┘
+                        │
+              google_keyword_ai  (ядро)
+   providers · normalization · storage · cache · pipeline · scoring · clustering
+```
+
+CLI и MCP равноправны и появляются вместе, с первой вехи. Обе обёртки обязаны
+быть тонкими: любая логика, оказавшаяся в них, — дефект. Skill не реализует
+API-клиентов вообще; его работа — `gkai doctor --format json`, выбор workflow,
+чтение результатов.
+
+Это нужно, чтобы один и тот же механизм работал из Claude Code, shell, cron, CI
+и других агентов.
+
+### Структура пакета
+
+```
+google_keyword_ai/
+    config.py            конфиг и его загрузка
+    errors.py            таксономия ошибок
+    logging.py           structured logging в stderr
+    http.py              httpx-клиент: таймауты, retry, backoff+jitter, пул
+    ratelimit.py         троттлеры на провайдер
+    cache.py             слой кеша с TTL из конфига
+    normalize.py         нормализация и дедупликация ключей
+    models.py            pydantic-модели домена
+    storage/             SQLAlchemy 2: схема, миграции, репозитории
+    providers/
+        base.py
+        autocomplete.py
+        trends/          unofficial.py, official.py, provider.py
+        google_ads.py
+        search_console.py
+    pipeline/            research, runs, budget, dry-run
+    scoring.py
+    clustering.py
+    reports/             table, json, jsonl, csv, markdown
+    cli/                 Typer-приложение
+    mcp/                 MCP-сервер
+data/
+    alphabets/           locale-aware алфавиты
+    modifiers/           intent-модификаторы по языкам
+```
+
+Файл, переваливший за ~200 строк, — сигнал, что он делает больше одного дела.
+
+## Технологический стек
+
+Версии проверены по реестрам 2026-09-02, не по памяти.
+
+| Компонент | Версия / выбор |
+|---|---|
+| Python | 3.14 (нижняя граница `requires-python = ">=3.12"`) |
+| Пакетный менеджер | `uv` |
+| CLI | Typer 0.27.2 |
+| Модели/конфиг | Pydantic 2.13.5 + pydantic-settings |
+| HTTP | httpx 0.28.1 |
+| MCP | `mcp` 2.1.1 (официальный Python SDK) |
+| ORM | SQLAlchemy 2.0.52, SQLite по умолчанию |
+| Google Ads | `google-ads` 31.4.0 (официальный клиент) |
+| Search Console | `google-api-python-client` 2.200.0 + google-auth |
+| Тесты | pytest 9.1.1 |
+| Линт/типы | ruff 0.16.5, pyright |
+
+Тяжёлый фреймворк там, где хватает обычного Python, не создавать.
+
+Сборка и прогон тестов — только в Docker (`python:3.14-slim` + uv). Локальная
+установка чего-либо запрещена.
+
+## Провайдеры
+
+Единый интерфейс. Каждый провайдер обязан иметь: собственную конфигурацию,
+`is_available()`, свой rate limiter, retry-политику, cache policy, типизированные
+модели ответа, сохранение сырого ответа и метаданные provenance.
+
+**Отключение одного провайдера не ломает остальные.** Частичный отказ не
+уничтожает исследование: нет Trends — research завершается на Ads + Autocomplete.
+
+### 1. Autocomplete — бесплатный discovery
+
+Неофициальный, недокументированный endpoint. Это должно быть явно написано в
+документации и в provenance. Стабильность не гарантируется.
+
+Проверено вживую 2026-09-02:
+
+```
+https://suggestqueries.google.com/complete/search?client=firefox&ie=utf-8&oe=utf-8&q=...&hl=ru&gl=th
+https://www.google.com/complete/search?client=chrome&ie=utf-8&oe=utf-8&q=...&hl=ru&gl=th
+```
+
+Оба отдают 200. **`ie=utf-8&oe=utf-8` обязательны** — без них ответ приходит не в
+UTF-8 и кириллица превращается в мусор. Вариант `client=chrome` на
+`www.google.com` точнее учитывает `gl`: для `gl=th` он первым отдал
+«аренда квартиры паттайя», тогда как `suggestqueries` — «посуточно». Основным
+делать `www.google.com/complete/search?client=chrome`, второй — фолбэком.
+
+YouTube-семантика: тот же endpoint с `&ds=yt` (проверено, работает).
+
+**Fan-out.** Из одного seed:
+
+- суффиксный алфавит: `seed а`, `seed б`, … — **locale-aware**, для русского
+  кириллица, не только латиница. Алфавиты лежат в data-файлах;
+- префиксный алфавит: `а seed`, `б seed`, …;
+- цифры `seed 0`…`seed 9`;
+- intent-модификаторы по языкам и категориям (informational / commercial /
+  comparison / transactional-local), тоже в data-файлах, расширяемые.
+
+**Рекурсия** (`--depth N`) с обязательными предохранителями: `max_depth`,
+`max_queries`, `max_results`, `max_runtime`. Комбинаторный взрыв недопустим.
+
+При блокировке: остановить запросы, увеличить backoff, показать понятную ошибку,
+дать исследованию продолжиться другими провайдерами. Обход CAPTCHA, ротация
+прокси и маскировка под браузер сверх разумного User-Agent — запрещены.
+
+### 2. Google Trends
+
+Официальный Trends API на 2026-09 — закрытая alpha, доступа у владельца нет.
+Библиотеки-обёртки мертвы: `pytrends` заархивирован 17.04.2025, `trendspy` без
+коммитов с 25.12.2024 при 14 открытых issues. Тянуть их в зависимости нельзя.
+
+Решение: один `GoogleTrendsProvider` с двумя адаптерами и capability detection.
+
+**`trends_official`** — адаптер под alpha-API. Без креда `is_available()` = false.
+Не симулировать его наличие.
+
+**`trends_unofficial`** — собственный тонкий клиент на httpx. Схема проверена
+вживую 2026-09-02, все три шага отработали:
+
+1. Прогрев сессии: `GET https://trends.google.com/_/TrendsUi/data/batchexecute`
+   отвечает **405 и ставит cookie `NID`**. Это и есть лекарство от 429 на самом
+   первом запросе. Фолбэк-прогрев: `GET /trends/`, но он весит сотни килобайт
+   против ~100 байт у batchexecute.
+2. `GET /trends/api/explore?hl=&tz=&req={...}` → виджеты с токенами. Проверено:
+   вернулись `TIMESERIES`, `GEO_MAP`, `RELATED_TOPICS`, `RELATED_QUERIES`.
+3. `GET /trends/api/widgetdata/multiline` (таймсерия), `/comparedgeo` (регионы),
+   `/relatedsearches` (related + rising). Проверено: 53 недельные точки за 12
+   месяцев; related отдал и top (значения 0–100), и rising (значения вида 8550 с
+   `formattedValue: "Сверхпопулярность"`).
+
+Технические обязательности: тело ответа начинается с префикса `)]}',\n` — его
+надо срезать перед JSON-разбором; заголовки `user-agent`, `accept-language`,
+`referer`; интервал между widget-вызовами **~800 мс**.
+
+Провайдер помечает свои данные в provenance как `unofficial / unstable`. 429 →
+экспоненциальный backoff → честный `ProviderUnavailableError`, без попыток
+обхода.
+
+Архитектура обязана позволить добавить третий адаптер (например платный) без
+правки пайплайна.
+
+**Запрет:** Trends отдаёт относительный интерес, а не объём. В моделях для него
+отдельные поля — `trend_interest`, `trend_growth`, `trend_direction`,
+`seasonality` — и они никогда не попадают в поля объёма.
+
+### 3. Google Ads Keyword Planner — опциональный источник абсолютного объёма
+
+Реализуется полностью, но остаётся опциональным: у владельца пока нет developer
+token, поэтому весь пайплайн обязан работать без него, а `gkai doctor` — честно
+показывать `missing credentials`. Проверяться на приёмке будет моками; живой
+прогон — когда появится токен.
+
+Официальный клиент, `KeywordPlanIdeaService`, четыре режима seed:
+`keyword_seed`, `url_seed`, `keyword_and_url_seed`, `site_seed`. Плюс
+`GenerateKeywordHistoricalMetrics` для известных ключей.
+
+Собирать, когда доступно: `keyword`, `avg_monthly_searches`,
+`monthly_search_volumes`, `competition`, `competition_index`,
+`low_top_of_page_bid`, `high_top_of_page_bid`, `currency`, `language`, `geo`,
+`source`, `retrieved_at`. Поддержать language, geo target, Google Search /
+search partners, adult keywords flag.
+
+**Rate limit:** Keyword Planning API ограничен примерно 1 запросом в секунду на
+customer ID. Централизованный троттлинг, по умолчанию `<= 1 rps/CID`. Обходить
+ограничение не пытаться. При `RESOURCE_EXHAUSTED` — экспоненциальный backoff с
+джиттером, понятное сообщение, продолжение работы с кеша при повторном запуске.
+Historical metrics обновляются примерно раз в месяц — TTL кеша длинный,
+настраиваемый.
+
+**Запрет:** Ads competition — это не SEO difficulty. В отчётах писать именно
+`Ads competition`. Site seed даёт «keyword ideas Google для сайта», а не
+«запросы, по которым сайт ранжируется»; формулировка про ranking запрещена.
+
+### 4. Google Search Console
+
+Реальный спрос для уже существующего сайта: `query`, `page`, `country`, `device`,
+`date`, `clicks`, `impressions`, `ctr`, `position`. Поддержать фильтры по
+диапазону дат, стране, устройству, странице, запросу, типу поиска.
+
+Пагинацию реализовать корректно. Молча обрезать результаты запрещено: при
+подходе к лимиту API (порядка 50 000 строк в сутки на property и тип поиска)
+явно предупреждать пользователя.
+
+Opportunity mining — отдельный workflow: запросы с показами, позицией примерно
+5–30 и CTR ниже ожидаемого. Пороги конфигурируемы, магических чисел без
+возможности их изменить быть не должно. Выводить quick wins, возможности
+расширения контента, возможности новых страниц.
+
+BigQuery-бэкенд (`SearchConsoleBigQueryProvider`) в MVP — только интерфейс рядом
+с `SearchConsoleApiProvider`, без реализации. В документации зафиксировать, что
+для крупных сайтов правильный следующий уровень — ежедневный bulk export в
+BigQuery.
+
+## Модель данных и provenance
+
+Provenance — одно из главных требований проекта, а не украшение.
+
+Каждая метрика обязана позволять ответить: откуда взялась цифра, когда получена,
+для какой страны и языка, это сырьё или расчёт. Поэтому у любого числа есть
+`source`, `retrieved_at`, `language`, `country`, `is_derived`. На этом стоит
+команда `gkai keyword inspect "..."`.
+
+Ключевое слово хранится одновременно в двух видах: `keyword_raw` и
+`keyword_normalized`.
+
+Нормализация: trim, схлопывание пробелов, Unicode NFKC, locale-aware casefold,
+настраиваемая нормализация пунктуации, сохранение исходного варианта.
+Агрессивный стемминг, способный слить разные интенты, запрещён.
+
+Дедупликация — по нормализованной форме, но связи с источниками не теряются:
+
+```
+keyword X
+    discovered_from:
+        autocomplete seed A
+        autocomplete seed B
+        google_ads site example.com
+```
+
+Схема нормализованная, проектируется в реализации; концептуальный набор полей
+ключа: текст и нормализованный текст, язык, страна, источники, объёмные метрики
+Ads, помесячная история, competition и bids, трендовые поля, метрики GSC,
+`discovered_from`, `first_seen_at`, `last_seen_at`.
+
+## Хранилище, кеш, конфигурация
+
+**БД.** SQLite по умолчанию, путь по XDG Base Directory. Переопределяется
+`GKAI_DATA_DIR` и `DATABASE_URL` (последний открывает PostgreSQL).
+
+**Кеш.** Все внешние вызовы идут через слой кеша. Ключ учитывает провайдера,
+endpoint, запрос, язык, страну, опции и версию API там, где она значима. TTL по
+провайдерам: у autocomplete короткий, у Ads ideas средний, у Ads historical
+metrics длинный (порядка периода обновления данных), у Trends и GSC —
+конфигурируемый. **TTL не хардкодятся в бизнес-логике.**
+
+**Конфиг.** `~/.config/google-keyword-ai-mcp/config.toml` и проектный
+`.gkai.toml`. Переменные окружения имеют приоритет там, где это логично:
+
+```
+GKAI_GOOGLE_ADS_DEVELOPER_TOKEN
+GKAI_GOOGLE_ADS_CUSTOMER_ID
+GKAI_GOOGLE_ADS_LOGIN_CUSTOMER_ID
+GKAI_GOOGLE_ADS_CLIENT_ID
+GKAI_GOOGLE_ADS_CLIENT_SECRET
+GKAI_GOOGLE_ADS_REFRESH_TOKEN
+GKAI_DATABASE_URL
+GKAI_DATA_DIR
+```
+
+Креды не хранятся в БД в plaintext без необходимости; их место — переменные
+окружения, защищённый конфиг, штатные механизмы Google. Секреты не попадают в
+логи и маскируются в `gkai config show`. В репозитории — только `.env.example` с
+пустыми плейсхолдерами.
+
+## Пайплайн исследования
+
+```
+seed
+ → autocomplete suggestions
+ → fan-out
+ → рекурсивное расширение
+ → нормализация
+ → дедупликация
+ → отсев мусора
+ → Google Ads keyword ideas
+ → Google Ads historical metrics
+ → Google Trends, где доступен
+ → Search Console enrichment, если передана property
+ → scoring
+ → clustering
+ → report
+```
+
+Cheap-first соблюдается жёстко: в Google Ads уходит только то, что пережило
+дедуп и фильтр, а не все комбинации.
+
+**Budget guard.** `--max-keywords`, `--max-ads-calls` и подобные лимиты.
+`--dry-run` до дорогой стадии показывает: сколько будет autocomplete-запросов,
+сколько кандидатов, сколько примерно вызовов Ads API, какие провайдеры будут
+использованы и какие недоступны.
+
+**Runs.** `--save-run` заводит запуск с идентификатором `run_...` и сохраняет
+вход, снимок конфига без секретов, метаданные запросов, сырые ответы там, где это
+уместно, нормализованные данные, финальный отчёт, таймстемпы и ошибки. Команды
+`run show`, `run export`, `run rerun`. Прерванный запуск продолжается через
+`run resume <id>` и не переигрывает уже закешированное.
+
+## Scoring, кластеризация, отчёты
+
+**Opportunity Score 0–100, конфигурируемый и прозрачный.** Псевдонаучности не
+допускать: все компоненты видны пользователю, веса и формула живут в конфиге и
+описаны в `docs/scoring.md`. Факторы: спрос, рост тренда, коммерческая ценность,
+существующие показы GSC, возможность по текущему ранжированию, сезонность.
+Команда `gkai explain-score "keyword"` показывает, почему ключ получил свой балл.
+
+Если SERP-данных нет, difficulty так и печатается: `SEO difficulty: unknown`.
+Подменять её Ads competition запрещено.
+
+**Niche analyze.** `gkai niche analyze "seed"` оценивает нишу по независимым
+факторам: суммарный измеримый спрос, число значимых ключей, глубина long-tail,
+направление тренда, сезонность, коммерческая ценность и ставки, концентрация
+запросов, разнообразие контентных кластеров, покрытие существующим сайтом при
+наличии GSC. Общий Niche Opportunity Score 0–100 допустим, но только рядом с
+разбивкой по факторам.
+
+**Кластеризация.** Первая версия детерминированная: лексическое сходство,
+пересечение токенов, нормализованные n-граммы, intent-модификаторы. LLM по
+умолчанию не используется. Архитектура готова к добавлению embedding-, SERP-
+overlap- и LLM-кластеризаторов.
+
+**Вывод.** Форматы `table`, `json`, `jsonl`, `csv`, `markdown`. JSON стабильный и
+задокументированный. **Логи только в stderr, stdout — чистые данные.** Это
+критично для агентов и скриптов.
+
+Markdown-отчёт исследования содержит разделы: шапка (seed, язык, страна,
+провайдеры), Summary, Top opportunities, Keyword clusters, Trends, Long-tail
+opportunities, Search Console opportunities и обязательный **Data quality /
+limitations** — какие провайдеры использованы, каких не было, когда получены
+данные, какие показатели абсолютные, какие относительные, какие расчётные.
+
+## Ошибки и HTTP
+
+Никаких голых `except`. Минимальная таксономия: `AuthenticationError`,
+`RateLimitError`, `ProviderUnavailableError`, `InvalidConfigurationError`,
+`NetworkError`, `ApiError`, `PartialResultError`.
+
+HTTP: вменяемый User-Agent, таймауты, экспоненциальный backoff с джиттером,
+retry только для retryable-ошибок, пул соединений.
+
+## MCP-сервер
+
+Транспорт stdio, имя `google-keyword-ai`. Появляется в первой вехе и растёт
+вместе с CLI: каждая веха, добавляющая провайдера, добавляет и его инструмент.
+
+Итоговый набор инструментов: `doctor`, `suggest_keywords`, `expand_keywords`,
+`analyze_trends`, `get_keyword_metrics`, `analyze_competitor`,
+`find_gsc_opportunities`, `research_keywords`, `explain_score`, `inspect_keyword`,
+`analyze_niche`.
+
+Инструменты возвращают те же структуры, что и `--format json` у CLI.
+
+## Claude Skill
+
+```
+.claude/skills/researching-google-keywords/
+    SKILL.md
+    reference/   workflow.md, metrics.md, cli.md
+    examples/    niche-research.md, competitor-research.md, existing-site.md
+```
+
+SKILL.md компактный, с progressive disclosure и ссылками на reference; заведомо
+меньше 500 строк, энциклопедией быть не должен. Frontmatter — по актуальному
+формату Agent Skills, проверить перед реализацией. Description обязана явно
+описывать, когда скил применять: исследование спроса Google, long-tail, ниши,
+keyword ideas по конкуренту, тренды, возможности Search Console.
+
+**Поведение.** Сначала `gkai doctor --format json`, затем выбор workflow без
+принуждения пользователя вручную выбирать API:
+
+- новая ниша: autocomplete → expansion → Ads → Trends;
+- конкурент/сайт: Ads site/url seed → расширение найденных тем → метрики → Trends;
+- существующий сайт: Search Console → opportunity mining → Ads enrichment → Trends.
+
+**Правила вывода.** Skill всегда различает абсолютные данные Ads, относительный
+интерес Trends, реальные показы GSC и расчётные баллы. Три запрета из разделов
+выше повторяются в SKILL.md дословно.
+
+**Evals**, минимум три:
+
+1. «Исследуй поисковый спрос по теме "аренда квартиры в Паттайе" для русского
+   языка и Таиланда» → autocomplete, Ads при наличии кредов, Trends при наличии,
+   GSC не требуется.
+2. «Посмотри, какие keyword themes Google связывает с competitor.com» → Ads site
+   seed, без утверждений про organic rankings.
+3. «Найди запросы моего сайта, где много показов, но страницу можно улучшить» →
+   GSC opportunity workflow, при необходимости обогащение из Ads.
+
+## Тестирование
+
+По умолчанию `pytest` гоняет только unit и mocked HTTP: нормализация,
+дедупликация, scoring, кеширование, CLI, отказы провайдеров, rate limiting.
+Живые вызовы вынесены в `pytest -m integration` и запускаются только при наличии
+кредов.
+
+Обязательный набор сценариев: недоступность Google Ads; недоступность Trends;
+недоступность Search Console; таймаут autocomplete; срабатывание rate limit;
+частичный результат исследования; попадание в кеш; истечение кеша; предел
+рекурсивного расширения; юникод и русские ключи; стабильность JSON-вывода CLI;
+возобновление прерванного запуска.
+
+Прогон в Docker — часть приёмки на стороне владельца, Codex'у Docker недоступен.
+Тесты, написанные Codex'ом, проходят мутационную проверку: код и тест к нему
+пишет один и тот же исполнитель, и одно заблуждение попадает в оба.
+
+## Документация
+
+```
+README.md
+docs/
+    architecture.md
+    autocomplete.md
+    trends.md
+    google-ads.md
+    search-console.md
+    scoring.md
+    mcp.md
+    skill.md
+    privacy.md
+```
+
+README: что делает проект, quick start, установка, `gkai doctor`, базовое
+исследование, исследование конкурента, workflow Search Console, MCP-сервер,
+Claude Skill, ограничения. Текущий README репозитория описывает скоуп неточно
+(не упоминает Google Ads) и переписывается.
+
+Позиционирование: «open-source CLI, MCP server and agent skill for collecting,
+enriching and analyzing Google search-demand data from Google Ads Keyword
+Planner, Autocomplete, Trends and Search Console».
+
+Обязательный дисклеймер, поскольку в названии есть Google:
+
+```
+This project is not affiliated with or endorsed by Google.
+Google and related product names are trademarks of their respective owners.
+```
+
+Перед реализацией интеграции с каждым Google API: проверить актуальную
+официальную документацию и версию API, не полагаться на снипеты из памяти, не
+выдумывать методы и поля, записать использованный источник в соответствующий
+`docs/*.md`.
+
+## Расширяемость
+
+Спроектировать так, чтобы позже без переписывания добавились: DataForSEO,
+SerpApi, Bing Webmaster, Яндекс Wordstat, Google SERP/PAA, YouTube Autocomplete,
+Google Shopping, Google News, SERP-overlap кластеризация, мониторинг AI Overview.
+
+Ничего из этого в первой версии не реализуется.
+
+## Вехи
+
+По одной на прогон codex-build. Каждая — не больше ~12 машинно-проверяемых
+критериев. MCP растёт вместе с CLI.
+
+| # | Веха | CLI | MCP |
+|---|---|---|---|
+| M1 | Каркас: uv/pyproject, config, storage, cache, HTTP + retry + rate limit, таксономия ошибок, логи в stderr | `doctor`, `config show` | сервер + `doctor` |
+| M2 | Autocomplete, нормализация, дедупликация, fan-out, рекурсия с предохранителями | `suggest`, `expand` | `suggest_keywords`, `expand_keywords` |
+| M3 | Trends: неофициальный клиент + адаптер официального, capability detection | `trends`, `trends compare` | `analyze_trends` |
+| M4 | Google Ads: 4 вида seed, historical metrics, троттлинг 1 rps, длинный TTL | `ads ideas`, `ads historical`, `competitor` | `get_keyword_metrics`, `analyze_competitor` |
+| M5 | Search Console: OAuth, пагинация, opportunity mining | `gsc properties`, `gsc queries`, `gsc opportunities` | `find_gsc_opportunities` |
+| M6 | Пайплайн, runs, budget guard, dry-run, resume | `research`, `run show/export/resume/rerun` | `research_keywords` |
+| M7 | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
+| M8 | Claude Skill, evals, docs, README | — | — |
+
+После каждой вехи: `ruff check .`, `pytest`, проверка типов. Не переходить
+дальше, пока предыдущий слой сломан.
+
+## Definition of Done для MVP
+
+Работают без кредов Google:
+
+```bash
+gkai doctor
+gkai suggest "купить квартиру" --language ru --country RU
+gkai expand "купить квартиру" --language ru --country RU --depth 1
+gkai trends "купить квартиру" --language ru --country RU
+gkai research "купить квартиру" --language ru --country RU --format json
+```
+
+Работают при наличии кредов Google Ads:
+
+```bash
+gkai ads historical "купить квартиру" "купить квартиру в москве" --language ru --country RU
+gkai competitor example.com --language ru --country RU
+```
+
+MCP-сервер поднимается по stdio и отдаёт заявленные инструменты. Claude Code
+обнаруживает `/researching-google-keywords` и использует его для SEO-исследований.
+`gkai research --format json` возвращает стабильный машинночитаемый результат.
+
+## Безопасность
+
+Никогда: не коммитить OAuth-токены, не писать токены в логи, не класть реальные
+креды в фикстуры, не показывать секреты через `gkai config show`. Обход CAPTCHA и
+ротация прокси для обхода блокировок не реализуются.
