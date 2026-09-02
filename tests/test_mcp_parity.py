@@ -20,6 +20,7 @@ from google_keyword_ai.mcp import server as mcp_server
 from google_keyword_ai.mcp.server import build_server
 from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.opportunities import Opportunity
+from google_keyword_ai.pipeline.models import DryRunPlan, SourceUsage
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
@@ -90,6 +91,84 @@ def test_doctor_tool_is_synchronous_so_the_sdk_offloads_it(thread_offload: None)
     """
     server = build_server(Settings())
     tool = server._tool_manager.get_tool("doctor")
+    assert tool is not None
+    assert tool.is_async is False
+
+
+def test_cli_dry_run_and_mcp_plan_research_have_identical_wire_envelopes(
+    thread_offload: None,
+    monkeypatch: object,
+) -> None:
+    from pytest import MonkeyPatch
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    settings = Settings()
+
+    def fake_run_research(
+        _settings: Settings, target: str, **_kwargs: object
+    ) -> Envelope[DryRunPlan]:
+        return Envelope(
+            data=DryRunPlan(
+                scenario="niche",
+                steps=[f"plan {target}"],
+                estimated_autocomplete_queries=10,
+                estimated_ads_calls=1,
+                estimated_trends_calls=1,
+                sources=[
+                    SourceUsage(name="autocomplete", used=False, available=True, detail="available")
+                ],
+            )
+        )
+
+    monkeypatch.setattr(mcp_server, "run_research", fake_run_research)
+    monkeypatch.setattr(cli_main, "run_research", fake_run_research)
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    server = build_server(settings)
+
+    async def call_research() -> dict[str, object]:
+        async with (
+            create_client_server_memory_streams() as (
+                (client_read, client_write),
+                (server_read, server_write),
+            ),
+            anyio.create_task_group() as task_group,
+        ):
+            low_level_server = server._lowlevel_server
+
+            async def run_server() -> None:
+                await low_level_server.run(
+                    server_read,
+                    server_write,
+                    low_level_server.create_initialization_options(),
+                    raise_exceptions=True,
+                )
+
+            task_group.start_soon(run_server)
+            async with ClientSession(client_read, client_write) as client:
+                await client.initialize()
+                result = await client.call_tool(
+                    "plan_research",
+                    {"target": "running shoes"},
+                )
+            task_group.cancel_scope.cancel()
+
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    mcp_payload = anyio.run(call_research)
+    cli_result = CliRunner().invoke(
+        cli_main.app,
+        ["research", "running shoes", "--dry-run"],
+    )
+
+    assert cli_result.exit_code == 0, cli_result.output
+    assert mcp_payload == json.loads(cli_result.stdout)
+
+
+def test_research_keywords_tool_is_synchronous(thread_offload: None) -> None:
+    server = build_server(Settings())
+    tool = server._tool_manager.get_tool("research_keywords")
     assert tool is not None
     assert tool.is_async is False
 
@@ -537,3 +616,30 @@ def test_find_gsc_opportunities_tool_is_synchronous(thread_offload: None) -> Non
     tool = server._tool_manager.get_tool("find_gsc_opportunities")
     assert tool is not None
     assert tool.is_async is False
+
+
+def test_plan_research_tool_is_synchronous(thread_offload: None) -> None:
+    server = build_server(Settings())
+    tool = server._tool_manager.get_tool("plan_research")
+    assert tool is not None
+    assert tool.is_async is False
+
+
+def test_no_tool_nests_its_payload_under_a_result_key(thread_offload: None) -> None:
+    """A union return type silently breaks the CLI/MCP contract.
+
+    When a tool is annotated as returning one of several models, the SDK cannot
+    describe a single object schema and wraps the payload under "result". The
+    CLI prints the envelope itself, so the two interfaces stop matching while
+    every individual tool still "works". Checking the declared schemas catches
+    this for every tool at once, including ones added later.
+    """
+    server = build_server(Settings())
+    for tool in server._tool_manager.list_tools():
+        schema = tool.output_schema
+        assert schema is not None, tool.name
+        properties = schema.get("properties", {})
+        assert "schema_version" in properties, (
+            f"tool {tool.name} does not return the shared envelope; "
+            f"its payload keys are {sorted(properties)}"
+        )

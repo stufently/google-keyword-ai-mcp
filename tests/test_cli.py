@@ -192,6 +192,37 @@ def test_third_party_logs_go_to_stderr_not_stdout(tmp_path: Path) -> None:
     )
 
 
+def test_research_dry_run_prints_plan_without_provider_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "research-data")
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "research",
+            "running shoes",
+            "--dry-run",
+            "--max-keywords",
+            "40",
+            "--max-autocomplete-queries",
+            "10",
+            "--max-ads-calls",
+            "2",
+            "--max-trends-calls",
+            "1",
+            "--max-runtime",
+            "30",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload: dict[str, Any] = json.loads(result.stdout)
+    assert payload["data"]["scenario"] == "niche"
+    assert payload["data"]["estimated_autocomplete_queries"] == 10
+
+
 def test_expand_prints_json_envelope_and_forwards_options(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

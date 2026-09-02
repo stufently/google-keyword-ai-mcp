@@ -1,6 +1,6 @@
 import json
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 
@@ -8,6 +8,7 @@ from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.pipeline.budget import Budget
 from google_keyword_ai.usecases.ads import run_ads_historical, run_ads_ideas, run_competitor
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
@@ -16,6 +17,7 @@ from google_keyword_ai.usecases.gsc import (
     run_gsc_properties,
     run_gsc_queries,
 )
+from google_keyword_ai.usecases.research import run_research
 from google_keyword_ai.usecases.suggest import run_suggest
 from google_keyword_ai.usecases.trends import run_trends, run_trends_compare
 
@@ -294,6 +296,49 @@ def competitor(
             language=language,
             country=country,
             limit=limit,
+        ),
+        output_format,
+    )
+
+
+@app.command()
+def research(
+    target: str,
+    scenario: Annotated[str, typer.Option("--scenario")] = "auto",
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    seed_keyword: Annotated[str | None, typer.Option("--seed-keyword")] = None,
+    max_keywords: Annotated[int, typer.Option("--max-keywords")] = 2000,
+    max_autocomplete_queries: Annotated[int, typer.Option("--max-autocomplete-queries")] = 500,
+    max_ads_calls: Annotated[int, typer.Option("--max-ads-calls")] = 20,
+    max_trends_calls: Annotated[int, typer.Option("--max-trends-calls")] = 3,
+    max_runtime: Annotated[float, typer.Option("--max-runtime")] = 300.0,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        cast(
+            Envelope[object],
+            run_research(
+                settings,
+                target,
+                scenario=scenario,
+                language=language,
+                country=country,
+                seed_keyword=seed_keyword,
+                budget=Budget(
+                    max_keywords=max_keywords,
+                    max_autocomplete_queries=max_autocomplete_queries,
+                    max_ads_calls=max_ads_calls,
+                    max_trends_calls=max_trends_calls,
+                    max_runtime_seconds=max_runtime,
+                ),
+                dry_run=dry_run,
+                limit=limit,
+            ),
         ),
         output_format,
     )

@@ -1,9 +1,12 @@
+from typing import cast
+
 from mcp.server.mcpserver import MCPServer
 
 from google_keyword_ai import __version__
 from google_keyword_ai.config import Settings, load_settings
 from google_keyword_ai.envelope import Envelope
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.pipeline.models import DryRunPlan, ResearchData
 from google_keyword_ai.usecases.ads import (
     AdsData,
     run_ads_historical,
@@ -12,6 +15,7 @@ from google_keyword_ai.usecases.ads import (
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
 from google_keyword_ai.usecases.expand import ExpandData, run_expand
 from google_keyword_ai.usecases.gsc import OpportunitiesData, run_gsc_opportunities
+from google_keyword_ai.usecases.research import run_research
 from google_keyword_ai.usecases.suggest import SuggestData, run_suggest
 from google_keyword_ai.usecases.trends import TrendsData, run_trends_compare
 
@@ -126,6 +130,51 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             country=country,
             limit=limit,
         )
+
+    @server.tool()
+    def research_keywords(
+        target: str,
+        scenario: str = "auto",
+        language: str | None = None,
+        country: str | None = None,
+        seed_keyword: str | None = None,
+        limit: int | None = None,
+    ) -> Envelope[ResearchData]:
+        envelope = run_research(
+            active_settings,
+            target,
+            scenario=scenario,
+            language=language,
+            country=country,
+            seed_keyword=seed_keyword,
+            dry_run=False,
+            limit=limit,
+        )
+        return cast(Envelope[ResearchData], envelope)
+
+    # Planning is a separate tool on purpose. A single tool returning either
+    # shape would need a union return type, and the SDK then nests the payload
+    # under a "result" key while the CLI prints the envelope itself — the two
+    # interfaces would stop matching, which is exactly what the parity test
+    # exists to prevent.
+    @server.tool()
+    def plan_research(
+        target: str,
+        scenario: str = "auto",
+        language: str | None = None,
+        country: str | None = None,
+        seed_keyword: str | None = None,
+    ) -> Envelope[DryRunPlan]:
+        envelope = run_research(
+            active_settings,
+            target,
+            scenario=scenario,
+            language=language,
+            country=country,
+            seed_keyword=seed_keyword,
+            dry_run=True,
+        )
+        return cast(Envelope[DryRunPlan], envelope)
 
     return server
 
