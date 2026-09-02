@@ -1,9 +1,7 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from google_keyword_ai.clustering import cluster_keywords
 from google_keyword_ai.config import Settings
-from datetime import timedelta
-
 from google_keyword_ai.pipeline.budget import BudgetSpend
 from google_keyword_ai.pipeline.models import (
     DataQuality,
@@ -12,8 +10,8 @@ from google_keyword_ai.pipeline.models import (
     ResearchStats,
     SourceUsage,
 )
-from google_keyword_ai.reports.markdown import render_markdown
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
+from google_keyword_ai.reports.markdown import render_markdown
 from google_keyword_ai.scoring import score_keyword
 
 
