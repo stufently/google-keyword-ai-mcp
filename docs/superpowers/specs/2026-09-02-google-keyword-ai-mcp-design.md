@@ -710,18 +710,23 @@ Google Shopping, Google News, SERP-overlap кластеризация, мони�
 ## Вехи
 
 По одной на прогон codex-build. Каждая — не больше ~12 машинно-проверяемых
-критериев. MCP растёт вместе с CLI.
+критериев. MCP растёт вместе с CLI. Отметка ✅ означает принятую веху.
 
 | # | Веха | CLI | MCP |
 |---|---|---|---|
-| M1 | Каркас: config и порядок приоритетов, `Market`, конверт ответа и таксономия ошибок, логи в stderr, движок БД + миграции + схема кеша, parity-тест CLI↔MCP | `doctor`, `config show` | сервер + `doctor` |
-| M2 | HTTP-слой, retry/backoff, rate limit и логика кеша — вертикально, вместе с первым потребителем. Autocomplete, нормализация, дедупликация, fan-out, рекурсия с предохранителями, `docs/autocomplete.md` | `suggest`, `expand` | `suggest_keywords`, `expand_keywords` |
-| M3 | Trends: неофициальный клиент, kill switch, golden-фикстуры, circuit breaker, `normalization_scope`, интерфейс официального адаптера, `docs/trends.md` | `trends`, `trends compare` | `analyze_trends` |
-| M4 | Google Ads: 4 вида seed, historical metrics, межпроцессный троттлинг 1 rps/CID, criteria ID в `Market`, длинный TTL, `docs/google-ads.md` | `ads ideas`, `ads historical`, `competitor` | `get_keyword_metrics`, `analyze_competitor` |
-| M5 | Search Console: OAuth, постраничная выборка по дням, флаг усечения, opportunity mining, `docs/search-console.md` | `gsc properties`, `gsc queries`, `gsc opportunities` | `find_gsc_opportunities` |
-| M6 | Три сценария, runs с машиной состояний, budget guard, dry-run, resume. Выдаёт плоский список, отсортированный по спросу, **без scoring и кластеров** | `research`, `run show/export/resume/rerun` | `research_keywords` |
-| M7 | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция. Подключает scoring и кластеры к пайплайну M6 | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
-| M8 | Claude Skill, evals, docs, README | — | — |
+| M1 ✅ | Каркас: config и порядок приоритетов, `Market`, конверт ответа и таксономия ошибок, логи в stderr, движок БД + миграции + схема кеша, parity-тест CLI↔MCP | `doctor`, `config show` | сервер + `doctor` |
+| M2 | HTTP-слой, retry/backoff, rate limit, логика кеша, нормализация и дедупликация — вертикально с первым потребителем: Autocomplete, `docs/autocomplete.md` | `suggest` | `suggest_keywords` |
+| M3 | Веерное расширение: locale-aware алфавиты, intent-модификаторы, рекурсия с предохранителями | `expand` | `expand_keywords` |
+| M4 | Trends: неофициальный клиент, kill switch, golden-фикстуры, circuit breaker, `normalization_scope`, интерфейс официального адаптера, `docs/trends.md` | `trends`, `trends compare` | `analyze_trends` |
+| M5 | Google Ads: 4 вида seed, historical metrics, межпроцессный троттлинг 1 rps/CID, criteria ID в `Market`, длинный TTL, `docs/google-ads.md` | `ads ideas`, `ads historical`, `competitor` | `get_keyword_metrics`, `analyze_competitor` |
+| M6 | Search Console: OAuth, постраничная выборка по дням, флаг усечения, opportunity mining, `docs/search-console.md` | `gsc properties`, `gsc queries`, `gsc opportunities` | `find_gsc_opportunities` |
+| M7 | Три сценария, runs с машиной состояний, budget guard, dry-run, resume. Выдаёт плоский список, отсортированный по спросу, **без scoring и кластеров** | `research`, `run show/export/resume/rerun` | `research_keywords` |
+| M8 | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция. Подключает scoring и кластеры к пайплайну M7 | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
+| M9 | Claude Skill, evals, docs, README | — | — |
+
+**Почему вех девять, а не восемь.** Исходный M2 объединял всю HTTP-инфраструктуру
+с веерным расширением семантики и получался вдвое больше остальных. Расширение
+вынесено в отдельную веху: одна веха на прогон — это правило, а не пожелание.
 
 **Почему HTTP, retry, кеш и троттлинг уехали из M1 в M2.** У них в первой вехе
 нет ни одного потребителя, а слой, спроектированный без потребителя,
