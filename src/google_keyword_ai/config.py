@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     gsc_opportunity_min_position: float = 5.0
     gsc_opportunity_max_position: float = 30.0
     gsc_opportunity_max_ctr: float = 0.02
+    score_weight_demand: float = 0.35
+    score_weight_trend: float = 0.2
+    score_weight_commercial: float = 0.2
+    score_weight_opportunity: float = 0.25
+    score_demand_reference: int = 100000
+    score_bid_reference: float = 5.0
+    cluster_similarity_threshold: float = 0.34
+    cluster_min_size: int = 2
 
     @field_validator("log_level")
     @classmethod
@@ -160,6 +168,53 @@ class Settings(BaseSettings):
             raise InvalidConfigurationError(
                 "gsc_opportunity_min_position must be below gsc_opportunity_max_position."
             )
+        return self
+
+    @field_validator(
+        "score_weight_demand",
+        "score_weight_trend",
+        "score_weight_commercial",
+        "score_weight_opportunity",
+    )
+    @classmethod
+    def validate_score_weight(cls, value: float) -> float:
+        if value < 0:
+            raise InvalidConfigurationError("Score weights must be non-negative.")
+        return value
+
+    @field_validator("score_demand_reference", "cluster_min_size")
+    @classmethod
+    def validate_positive_analysis_integer(cls, value: int) -> int:
+        if value < 1:
+            raise InvalidConfigurationError("Scoring references and cluster size must be positive.")
+        return value
+
+    @field_validator("score_bid_reference")
+    @classmethod
+    def validate_positive_score_reference(cls, value: float) -> float:
+        if value <= 0:
+            raise InvalidConfigurationError("score_bid_reference must be positive.")
+        return value
+
+    @field_validator("cluster_similarity_threshold")
+    @classmethod
+    def validate_cluster_similarity_threshold(cls, value: float) -> float:
+        if not 0 < value <= 1:
+            raise InvalidConfigurationError(
+                "cluster_similarity_threshold must be above 0 and at most 1."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_score_weight_sum(self) -> Self:
+        total = (
+            self.score_weight_demand
+            + self.score_weight_trend
+            + self.score_weight_commercial
+            + self.score_weight_opportunity
+        )
+        if total <= 0:
+            raise InvalidConfigurationError("The sum of score weights must be above zero.")
         return self
 
 

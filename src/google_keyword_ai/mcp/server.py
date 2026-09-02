@@ -3,14 +3,26 @@ from typing import cast
 from mcp.server.mcpserver import MCPServer
 
 from google_keyword_ai import __version__
+from google_keyword_ai.clustering import KeywordCluster
 from google_keyword_ai.config import Settings, load_settings
 from google_keyword_ai.envelope import Envelope
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.pipeline.models import DryRunPlan, ResearchData
+from google_keyword_ai.scoring import KeywordScore
 from google_keyword_ai.usecases.ads import (
     AdsData,
     run_ads_historical,
     run_competitor,
+)
+from google_keyword_ai.usecases.analysis import (
+    KeywordProvenance,
+    NicheData,
+    ScoredResearchData,
+    run_cluster,
+    run_explain_score,
+    run_keyword_inspect,
+    run_niche_analyze,
+    run_score,
 )
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
 from google_keyword_ai.usecases.expand import ExpandData, run_expand
@@ -175,6 +187,26 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             dry_run=True,
         )
         return cast(Envelope[DryRunPlan], envelope)
+
+    @server.tool()
+    def score_run(run_id: str, limit: int | None = None) -> Envelope[ScoredResearchData]:
+        return run_score(active_settings, run_id, limit=limit)
+
+    @server.tool()
+    def cluster_run(run_id: str) -> Envelope[list[KeywordCluster]]:
+        return run_cluster(active_settings, run_id)
+
+    @server.tool()
+    def explain_score(run_id: str, keyword: str) -> Envelope[KeywordScore]:
+        return run_explain_score(active_settings, run_id, keyword)
+
+    @server.tool()
+    def analyze_niche(run_id: str) -> Envelope[NicheData]:
+        return run_niche_analyze(active_settings, run_id)
+
+    @server.tool()
+    def inspect_keyword(run_id: str, keyword: str) -> Envelope[KeywordProvenance]:
+        return run_keyword_inspect(active_settings, run_id, keyword)
 
     return server
 

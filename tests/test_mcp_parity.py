@@ -26,7 +26,9 @@ from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
 from google_keyword_ai.providers.google_ads import KeywordIdea, KeywordMetrics
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
+from google_keyword_ai.scoring import KeywordScore
 from google_keyword_ai.usecases.ads import AdsData
+from google_keyword_ai.usecases.analysis import NicheData, NicheFactor
 from google_keyword_ai.usecases.doctor import run_doctor
 from google_keyword_ai.usecases.expand import ExpandData
 from google_keyword_ai.usecases.gsc import OpportunitiesData
@@ -643,3 +645,51 @@ def test_no_tool_nests_its_payload_under_a_result_key(thread_offload: None) -> N
             f"tool {tool.name} does not return the shared envelope; "
             f"its payload keys are {sorted(properties)}"
         )
+
+
+def test_analysis_tools_do_not_nest_result_key(thread_offload: None, monkeypatch: object) -> None:
+    from pytest import MonkeyPatch
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    niche = Envelope(
+        data=NicheData(
+            seed="alpha",
+            opportunity_score=50,
+            factors=[
+                NicheFactor(
+                    name="trend_direction",
+                    value=None,
+                    available=False,
+                    explanation="missing",
+                )
+            ],
+            keywords_analyzed=1,
+            clusters=1,
+            caveats=[],
+        ),
+        run_id="run_test",
+    )
+    explained = Envelope(
+        data=KeywordScore(
+            keyword="alpha",
+            score=0,
+            components=[],
+            components_available=0,
+            components_total=0,
+            confidence="none",
+        ),
+        run_id="run_test",
+    )
+    monkeypatch.setattr(mcp_server, "run_niche_analyze", lambda *_args: niche)
+    monkeypatch.setattr(mcp_server, "run_explain_score", lambda *_args: explained)
+    server = build_server(Settings())
+    niche_tool = server._tool_manager.get_tool("analyze_niche")
+    explained_tool = server._tool_manager.get_tool("explain_score")
+    assert niche_tool is not None and niche_tool.is_async is False
+    assert explained_tool is not None and explained_tool.is_async is False
+    assert niche_tool.fn("run_test").to_wire() == niche.to_wire()
+    assert explained_tool.fn("run_test", "alpha").to_wire() == explained.to_wire()
+    assert niche_tool.output_schema is not None
+    assert explained_tool.output_schema is not None
+    assert "result" not in niche_tool.output_schema.get("properties", {})
+    assert "result" not in explained_tool.output_schema.get("properties", {})

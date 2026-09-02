@@ -4,12 +4,23 @@ from typing import Annotated, cast
 
 import typer
 
+from google_keyword_ai.clustering import cluster_keywords
 from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.pipeline.budget import Budget
+from google_keyword_ai.pipeline.models import ResearchData
+from google_keyword_ai.reports.markdown import render_markdown
+from google_keyword_ai.scoring import compute_trend_growth, score_keyword
 from google_keyword_ai.usecases.ads import run_ads_historical, run_ads_ideas, run_competitor
+from google_keyword_ai.usecases.analysis import (
+    run_cluster,
+    run_explain_score,
+    run_keyword_inspect,
+    run_niche_analyze,
+    run_score,
+)
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
 from google_keyword_ai.usecases.gsc import (
@@ -33,15 +44,25 @@ config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 ads_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 gsc_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 run_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+niche_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+keyword_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(config_app, name="config")
 app.add_typer(ads_app, name="ads")
 app.add_typer(gsc_app, name="gsc")
 app.add_typer(run_app, name="run")
+app.add_typer(niche_app, name="niche")
+app.add_typer(keyword_app, name="keyword")
 
 
 class OutputFormat(StrEnum):
     JSON = "json"
     TABLE = "table"
+
+
+class ResearchOutputFormat(StrEnum):
+    JSON = "json"
+    TABLE = "table"
+    MARKDOWN = "markdown"
 
 
 def _print_envelope[T](envelope: Envelope[T], output_format: OutputFormat) -> None:
@@ -325,34 +346,99 @@ def research(
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     save_run: Annotated[bool, typer.Option("--save-run")] = False,
     limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[
+        ResearchOutputFormat, typer.Option("--format")
+    ] = ResearchOutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    result = run_research(
+        settings,
+        target,
+        scenario=scenario,
+        language=language,
+        country=country,
+        seed_keyword=seed_keyword,
+        budget=Budget(
+            max_keywords=max_keywords,
+            max_autocomplete_queries=max_autocomplete_queries,
+            max_ads_calls=max_ads_calls,
+            max_trends_calls=max_trends_calls,
+            max_runtime_seconds=max_runtime,
+        ),
+        dry_run=dry_run,
+        limit=limit,
+        save_run=save_run,
+    )
+    if output_format is ResearchOutputFormat.MARKDOWN:
+        if not isinstance(result.data, ResearchData):
+            raise typer.BadParameter(
+                "Markdown format is available only for a completed research run."
+            )
+        growth = compute_trend_growth(result.data.trends)
+        scores = [
+            score_keyword(keyword, settings, trend_growth=growth)
+            for keyword in result.data.keywords
+        ]
+        clusters = cluster_keywords([keyword.keyword for keyword in result.data.keywords], settings)
+        typer.echo(render_markdown(result.data, scores, clusters), nl=False)
+        if result.completeness is not Completeness.COMPLETE:
+            raise typer.Exit(code=1)
+        return
+    _finish(cast(Envelope[object], result), OutputFormat(output_format.value))
+
+
+@app.command()
+def score(
+    run_id: str,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
     output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    _finish(
-        cast(
-            Envelope[object],
-            run_research(
-                settings,
-                target,
-                scenario=scenario,
-                language=language,
-                country=country,
-                seed_keyword=seed_keyword,
-                budget=Budget(
-                    max_keywords=max_keywords,
-                    max_autocomplete_queries=max_autocomplete_queries,
-                    max_ads_calls=max_ads_calls,
-                    max_trends_calls=max_trends_calls,
-                    max_runtime_seconds=max_runtime,
-                ),
-                dry_run=dry_run,
-                limit=limit,
-                save_run=save_run,
-            ),
-        ),
-        output_format,
-    )
+    _finish(run_score(settings, run_id, limit=limit), output_format)
+
+
+@app.command()
+def cluster(
+    run_id: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_cluster(settings, run_id), output_format)
+
+
+@app.command("explain-score")
+def explain_score_command(
+    run_id: str,
+    keyword: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_explain_score(settings, run_id, keyword), output_format)
+
+
+@niche_app.command("analyze")
+def niche_analyze_command(
+    run_id: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_niche_analyze(settings, run_id), output_format)
+
+
+@keyword_app.command("inspect")
+def keyword_inspect_command(
+    run_id: str,
+    keyword: str,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(run_keyword_inspect(settings, run_id, keyword), output_format)
 
 
 @run_app.command("list")

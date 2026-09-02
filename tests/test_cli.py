@@ -19,6 +19,14 @@ from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.opportunities import Opportunity
+from google_keyword_ai.pipeline.budget import BudgetSpend
+from google_keyword_ai.pipeline.models import (
+    DataQuality,
+    ResearchData,
+    ResearchKeyword,
+    ResearchStats,
+    SourceUsage,
+)
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
@@ -750,3 +758,44 @@ def test_gsc_opportunities_cli_forwards_options(
     assert captured["days"] == 14
     assert captured["country"] == "US"
     assert captured["limit"] == 3
+
+
+def test_analysis_commands_are_registered() -> None:
+    result = CliRunner().invoke(cli_main.app, ["--help"])
+    assert result.exit_code == 0
+    for command in ("score", "cluster", "explain-score", "niche", "keyword"):
+        assert command in result.output
+    assert CliRunner().invoke(cli_main.app, ["niche", "--help"]).exit_code == 0
+    assert CliRunner().invoke(cli_main.app, ["keyword", "--help"]).exit_code == 0
+
+
+def test_research_markdown_renders_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = datetime.now(UTC)
+    data = ResearchData(
+        scenario="topic",
+        input="alpha",
+        language="en",
+        country="US",
+        keywords=[
+            ResearchKeyword(
+                keyword="alpha keyword tool",
+                normalized="alpha keyword tool",
+                discovered_from=["autocomplete"],
+            )
+        ],
+        stats=ResearchStats(spend=BudgetSpend()),
+        data_quality=DataQuality(
+            sources=[SourceUsage(name="autocomplete", used=True, available=True, detail="used")],
+            retrieved_at=now,
+            absolute_metrics=[],
+            relative_metrics=[],
+            derived_metrics=[],
+            caveats=["Test caveat."],
+        ),
+    )
+    monkeypatch.setattr(cli_main, "load_settings", Settings)
+    monkeypatch.setattr(cli_main, "run_research", lambda *_args, **_kwargs: Envelope(data=data))
+    result = CliRunner().invoke(cli_main.app, ["research", "alpha", "--format", "markdown"])
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("# Keyword research\n")
+    assert "## Data quality and limitations" in result.output
