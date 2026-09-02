@@ -77,6 +77,13 @@ Console) в этой вехе НЕТ: они появятся в M2–M5. HTTP-�
 mcp 2.1.1, anyio, structlog 26.1.0. Dev-группа: pytest 9.1.1, ruff 0.16.5,
 mypy 2.3.1, respx 0.23.1.
 
+**Стартовое состояние проверок — красное, и это нормально.** Прямо сейчас
+`.venv/bin/ruff check .` проходит, а `.venv/bin/mypy` возвращает 2
+(`There are no .py[i] files in directory 'tests'`) и `.venv/bin/pytest -q`
+возвращает 5 (`no tests ran`) — просто потому, что кода и тестов ещё нет. Это
+НЕ дефект конфигурации: чинить `pyproject.toml` не нужно и запрещено, обе
+команды позеленеют сами, когда появятся файлы этой вехи.
+
 **Консольные скрипты уже прописаны** в `.venv/bin/gkai` и
 `.venv/bin/google-keyword-ai`; они указывают на
 `google_keyword_ai.cli.main:main` и `google_keyword_ai.mcp.server:main`.
