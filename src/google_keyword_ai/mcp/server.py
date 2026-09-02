@@ -7,6 +7,7 @@ from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
 from google_keyword_ai.usecases.expand import ExpandData, run_expand
 from google_keyword_ai.usecases.suggest import SuggestData, run_suggest
+from google_keyword_ai.usecases.trends import TrendsData, run_trends_compare
 
 
 def build_server(settings: Settings | None = None) -> MCPServer:
@@ -58,6 +59,21 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             max_runtime_seconds=max_runtime_seconds,
             strategies=strategies,
             limit=limit,
+        )
+
+    @server.tool()
+    def analyze_trends(
+        keywords: list[str],
+        language: str | None = None,
+        country: str | None = None,
+        timeframe: str = "today 12-m",
+    ) -> Envelope[TrendsData]:
+        return run_trends_compare(
+            active_settings,
+            keywords,
+            language=language,
+            country=country,
+            timeframe=timeframe,
         )
 
     return server

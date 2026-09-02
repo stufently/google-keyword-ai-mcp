@@ -1,8 +1,10 @@
 from pathlib import Path
 
+import pytest
 from pydantic import SecretStr
 
 from google_keyword_ai.config import Settings, load_settings, masked_dump
+from google_keyword_ai.errors import InvalidConfigurationError
 
 
 def test_precedence_environment_over_project_over_user_over_defaults(
@@ -78,3 +80,26 @@ def test_masked_dump_never_reveals_secrets(tmp_path: Path) -> None:
     assert result["google_ads_refresh_token"] is None
     assert "developer-secret" not in repr(result)
     assert "client-secret" not in repr(result)
+
+
+def test_trends_settings_defaults() -> None:
+    settings = Settings()
+
+    assert settings.trends_enabled is True
+    assert settings.trends_pacing_seconds == 0.8
+    assert settings.trends_cache_ttl_seconds == 21600
+    assert settings.trends_circuit_breaker_failures == 3
+    assert settings.trends_timezone_minutes == -180
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("trends_pacing_seconds", 0),
+        ("trends_cache_ttl_seconds", 0),
+        ("trends_circuit_breaker_failures", 0),
+    ],
+)
+def test_trends_settings_reject_invalid_limits(field: str, value: int) -> None:
+    with pytest.raises(InvalidConfigurationError):
+        Settings.model_validate({field: value})

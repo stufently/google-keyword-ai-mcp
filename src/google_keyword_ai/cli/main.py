@@ -11,6 +11,7 @@ from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
 from google_keyword_ai.usecases.suggest import run_suggest
+from google_keyword_ai.usecases.trends import run_trends, run_trends_compare
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -112,6 +113,44 @@ def expand(
             max_runtime_seconds=max_runtime_seconds,
             strategies=strategies,
             limit=limit,
+        ),
+        output_format,
+    )
+
+
+@app.command()
+def trends(
+    keywords: Annotated[list[str], typer.Argument()],
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "today 12-m",
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    if keywords and keywords[0] == "compare":
+        _finish(
+            run_trends_compare(
+                settings,
+                keywords[1:],
+                language=language,
+                country=country,
+                timeframe=timeframe,
+            ),
+            output_format,
+        )
+        return
+    if len(keywords) != 1:
+        raise typer.BadParameter(
+            "Provide one keyword, or use 'trends compare <keyword> <keyword> ...'."
+        )
+    _finish(
+        run_trends(
+            settings,
+            keywords[0],
+            language=language,
+            country=country,
+            timeframe=timeframe,
         ),
         output_format,
     )

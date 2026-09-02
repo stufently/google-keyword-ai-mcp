@@ -8,6 +8,7 @@ from google_keyword_ai import __version__
 from google_keyword_ai.config import Settings, masked_dump
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.errors import GkaiError
+from google_keyword_ai.providers.trends.provider import GoogleTrendsProvider
 from google_keyword_ai.storage.engine import open_database
 from google_keyword_ai.storage.migrations import SCHEMA_VERSION
 
@@ -38,9 +39,14 @@ def _provider_statuses(settings: Settings) -> list[ProviderStatus]:
         if settings.search_console_credentials_path is not None
         else "missing credentials"
     )
+    trends_available = GoogleTrendsProvider(settings=settings).is_available()
     return [
         ProviderStatus(name="autocomplete", available=True, detail="ready"),
-        ProviderStatus(name="trends", available=True, detail="not implemented yet (M2/M3)"),
+        ProviderStatus(
+            name="trends",
+            available=trends_available,
+            detail="ready (unofficial)" if trends_available else "disabled by configuration",
+        ),
         ProviderStatus(name="google_ads", available=False, detail=google_ads_detail),
         ProviderStatus(name="search_console", available=False, detail=search_console_detail),
     ]

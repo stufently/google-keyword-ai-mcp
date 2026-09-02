@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,10 @@ from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
+from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 from google_keyword_ai.usecases.doctor import run_doctor
 from google_keyword_ai.usecases.expand import ExpandData
+from google_keyword_ai.usecases.trends import TrendsData
 
 
 def run_cli(
@@ -265,3 +268,127 @@ def test_expand_prints_json_envelope_and_forwards_options(
         ExpansionStrategy.MODIFIERS,
     ]
     assert captured["max_runtime_seconds"] == 4.0
+
+
+def _trends_envelope(keywords: list[str]) -> Envelope[TrendsData]:
+    return Envelope(
+        data=TrendsData(
+            provider=ProviderInfo(name="trends", official=False, stability="unofficial"),
+            result=TrendsResult(
+                keywords=keywords,
+                geo="US",
+                timeframe="now 7-d",
+                normalization_scope="0123456789abcdef",
+                timeline=[
+                    TrendPoint(
+                        timestamp=datetime(2026, 9, 1, tzinfo=UTC),
+                        formatted_time="Sep 1, 2026",
+                        values=[100],
+                        has_data=[True],
+                    )
+                ],
+                retrieved_at=datetime(2026, 9, 2, tzinfo=UTC),
+                source="https://trends.google.com/trends/api/explore",
+            ),
+        )
+    )
+
+
+def test_trends_prints_json_and_forwards_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "trends-data")
+    captured: dict[str, object] = {}
+
+    def fake_run_trends(
+        active_settings: Settings, keyword: str, **kwargs: object
+    ) -> Envelope[TrendsData]:
+        captured.update(kwargs)
+        captured["settings"] = active_settings
+        captured["keyword"] = keyword
+        return _trends_envelope([keyword])
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_trends", fake_run_trends)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "trends",
+            "keyword",
+            "--language",
+            "en",
+            "--country",
+            "US",
+            "--timeframe",
+            "now 7-d",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["result"]["keywords"] == ["keyword"]
+    assert captured == {
+        "settings": settings,
+        "keyword": "keyword",
+        "language": "en",
+        "country": "US",
+        "timeframe": "now 7-d",
+    }
+
+
+def test_trends_compare_sends_keywords_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "trends-compare-data")
+    captured: dict[str, object] = {}
+
+    def fake_run_compare(
+        active_settings: Settings, keywords: list[str], **kwargs: object
+    ) -> Envelope[TrendsData]:
+        captured.update(kwargs)
+        captured["settings"] = active_settings
+        captured["keywords"] = keywords
+        return _trends_envelope(keywords)
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_trends_compare", fake_run_compare)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "trends",
+            "compare",
+            "one",
+            "two",
+            "--language",
+            "en",
+            "--country",
+            "US",
+            "--timeframe",
+            "now 7-d",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["result"]["keywords"] == ["one", "two"]
+    assert captured["keywords"] == ["one", "two"]
+    assert captured["timeframe"] == "now 7-d"
+
+
+def test_doctor_reports_trends_disabled_by_kill_switch(tmp_path: Path) -> None:
+    result = run_cli(
+        tmp_path,
+        "doctor",
+        "--format",
+        "json",
+        extra_env={"GKAI_TRENDS_ENABLED": "false"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    providers = json.loads(result.stdout)["data"]["providers"]
+    trends = next(provider for provider in providers if provider["name"] == "trends")
+    assert trends == {
+        "name": "trends",
+        "available": False,
+        "detail": "disabled by configuration",
+    }

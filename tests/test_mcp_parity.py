@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -21,7 +22,9 @@ from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
+from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 from google_keyword_ai.usecases.expand import ExpandData
+from google_keyword_ai.usecases.trends import TrendsData
 
 
 def test_cli_and_mcp_doctor_have_identical_wire_envelopes(
@@ -257,5 +260,87 @@ def test_cli_and_mcp_expand_have_identical_wire_envelopes(
 def test_expand_tool_is_synchronous(thread_offload: None) -> None:
     server = build_server(Settings())
     tool = server._tool_manager.get_tool("expand_keywords")
+    assert tool is not None
+    assert tool.is_async is False
+
+
+def test_analyze_trends_tool_has_usecase_parity(
+    thread_offload: None,
+    monkeypatch: object,
+) -> None:
+    from pytest import MonkeyPatch
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    settings = Settings()
+    expected = Envelope(
+        data=TrendsData(
+            provider=ProviderInfo(name="trends", official=False, stability="unofficial"),
+            result=TrendsResult(
+                keywords=["one", "two"],
+                geo="US",
+                timeframe="today 12-m",
+                normalization_scope="0123456789abcdef",
+                timeline=[
+                    TrendPoint(
+                        timestamp=datetime(2026, 9, 1, tzinfo=UTC),
+                        formatted_time="Sep 1, 2026",
+                        values=[50, 100],
+                        has_data=[True, True],
+                    )
+                ],
+                retrieved_at=datetime(2026, 9, 2, tzinfo=UTC),
+                source="https://trends.google.com/trends/api/explore",
+            ),
+        )
+    )
+
+    def fake_run_compare(
+        _settings: Settings,
+        keywords: list[str],
+        **_kwargs: object,
+    ) -> Envelope[TrendsData]:
+        assert keywords == ["one", "two"]
+        return expected
+
+    monkeypatch.setattr(mcp_server, "run_trends_compare", fake_run_compare)
+    server = build_server(settings)
+
+    async def call_trends() -> dict[str, object]:
+        async with (
+            create_client_server_memory_streams() as (
+                (client_read, client_write),
+                (server_read, server_write),
+            ),
+            anyio.create_task_group() as task_group,
+        ):
+            low_level_server = server._lowlevel_server
+
+            async def run_server() -> None:
+                await low_level_server.run(
+                    server_read,
+                    server_write,
+                    low_level_server.create_initialization_options(),
+                    raise_exceptions=True,
+                )
+
+            task_group.start_soon(run_server)
+            async with ClientSession(client_read, client_write) as client:
+                await client.initialize()
+                result = await client.call_tool(
+                    "analyze_trends",
+                    {"keywords": ["one", "two"], "language": "en", "country": "US"},
+                )
+            task_group.cancel_scope.cancel()
+
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    assert anyio.run(call_trends) == expected.to_wire()
+
+
+def test_analyze_trends_tool_is_synchronous(thread_offload: None) -> None:
+    server = build_server(Settings())
+    tool = server._tool_manager.get_tool("analyze_trends")
     assert tool is not None
     assert tool.is_async is False

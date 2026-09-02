@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     )
     autocomplete_rate_limit_per_second: float = 5.0
     autocomplete_cache_ttl_seconds: int = 86400
+    trends_enabled: bool = True
+    trends_pacing_seconds: float = 0.8
+    trends_cache_ttl_seconds: int = 21600
+    trends_circuit_breaker_failures: int = 3
+    trends_timezone_minutes: int = -180
     cache_enabled: bool = True
     google_ads_developer_token: SecretStr | None = None
     google_ads_customer_id: str | None = None
@@ -63,6 +68,7 @@ class Settings(BaseSettings):
     @field_validator(
         "http_timeout_seconds",
         "autocomplete_rate_limit_per_second",
+        "trends_pacing_seconds",
     )
     @classmethod
     def validate_positive_float(cls, value: float) -> float:
@@ -75,6 +81,20 @@ class Settings(BaseSettings):
     def validate_positive_ttl(cls, value: int) -> int:
         if value <= 0:
             raise InvalidConfigurationError("autocomplete_cache_ttl_seconds must be positive.")
+        return value
+
+    @field_validator("trends_cache_ttl_seconds")
+    @classmethod
+    def validate_positive_trends_ttl(cls, value: int) -> int:
+        if value <= 0:
+            raise InvalidConfigurationError("trends_cache_ttl_seconds must be positive.")
+        return value
+
+    @field_validator("trends_circuit_breaker_failures")
+    @classmethod
+    def validate_trends_circuit_breaker_failures(cls, value: int) -> int:
+        if value < 1:
+            raise InvalidConfigurationError("trends_circuit_breaker_failures must be at least 1.")
         return value
 
 
