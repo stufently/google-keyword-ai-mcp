@@ -3,6 +3,8 @@ import re
 from pathlib import Path
 
 import pytest
+from typer import Typer
+from typer.main import get_command_name
 
 from google_keyword_ai.cli.main import app as cli_app
 from google_keyword_ai.config import Settings
@@ -62,13 +64,44 @@ def test_skill_referenced_files_exist() -> None:
     assert all((SKILL_DIR / relative_path).is_file() for relative_path in references)
 
 
+def _command_names(app: Typer) -> set[str]:
+    """Every command name Typer exposes, including the ones it derives.
+
+    A command registered without an explicit name still gets one, derived from
+    the function name. Collecting only ``item.name`` silently skips those --
+    and that is most of them, ``suggest`` and ``research`` included.
+    """
+    names: set[str] = set()
+    for item in app.registered_commands:
+        if item.name:
+            names.add(item.name)
+        elif item.callback is not None:
+            names.add(get_command_name(item.callback.__name__))
+    return names
+
+
 def test_cli_reference_covers_every_top_level_command() -> None:
     text = (SKILL_DIR / "reference" / "cli.md").read_text(encoding="utf-8")
-    names = {item.name for item in cli_app.registered_commands if item.name is not None}
+    names = _command_names(cli_app)
     names.update(item.name for item in cli_app.registered_groups if item.name is not None)
 
-    assert names
+    assert len(names) == 15
     assert all(re.search(rf"\bgkai {re.escape(name)}\b", text) for name in names)
+
+
+def test_cli_reference_covers_every_subcommand() -> None:
+    text = (SKILL_DIR / "reference" / "cli.md").read_text(encoding="utf-8")
+    pairs = {
+        (group.name, name)
+        for group in cli_app.registered_groups
+        if group.name is not None and group.typer_instance is not None
+        for name in _command_names(group.typer_instance)
+    }
+
+    assert pairs
+    assert all(
+        re.search(rf"\bgkai {re.escape(group)} {re.escape(name)}\b", text) for group, name in pairs
+    )
 
 
 def test_mcp_document_covers_every_tool() -> None:
