@@ -52,6 +52,10 @@ addopts = "-m 'not integration'"
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# Milestone specs are an archive of what was asked for at the time; ruff would
+# reformat the Python snippets inside them and make the record diverge from what
+# was actually handed to the implementer.
+extend-exclude = ["docs/specs"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
