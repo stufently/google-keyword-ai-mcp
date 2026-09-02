@@ -40,7 +40,9 @@ Use [the CLI reference](reference/cli.md) when composing flags or follow-up comm
 For `research`, run `--dry-run` first and show the planned sources, steps and call
 estimates. Run the real request only after the user accepts that plan. Add
 `--save-run` to substantial research so it can be inspected, scored, clustered,
-exported or resumed without repeating successful calls.
+exported or resumed later. Scoring, clustering and export read the stored result
+and cost nothing; `resume` replays collection unless every stage is still valid,
+so treat it as a retry after a failure, not as a free continuation.
 
 ## Report numbers by kind
 

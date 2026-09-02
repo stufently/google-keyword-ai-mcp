@@ -93,7 +93,9 @@ gkai run resume <run_id>
 gkai run rerun <run_id>
 ```
 
-`resume` continues the same run and reuses valid checkpoints. `rerun` creates a new
-run from the same request. `show` explains stage state; `export` returns the stored
+`resume` continues the same run. It skips collection only when every stage is
+still valid; one stale stage replays the whole scenario, so `resume` is a retry
+after a failure rather than a free continuation. `rerun` creates a new run from
+the same request. `show` explains stage state; `export` returns the stored
 result. Read [project run documentation](../../../../docs/runs.md) for checkpoint
 and version rules.

@@ -53,7 +53,9 @@ interprocess limit.
 
 SQLite uses WAL, a busy timeout, foreign keys and numbered forward migrations.
 Schema v1 added cached payloads; v2 added runs, stages, fingerprints and
-checkpoints. Saved configuration snapshots use masked values. See
+checkpoints; v3 added the rest of the original request to a run — its seed
+keyword and result limit — so `resume` and `rerun` repeat the question that was
+actually asked. Saved configuration snapshots use masked values. See
 [pipeline](pipeline.md) and [runs](runs.md).
 
 ## Milestones
