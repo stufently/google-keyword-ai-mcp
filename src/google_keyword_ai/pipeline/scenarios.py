@@ -327,6 +327,14 @@ def _research_data(
     stopped_by = context.budget_guard.exhausted_reason()
     if expansion is not None and expansion.stopped_by is not None:
         stopped_by = _EXPANSION_STOP_TO_BUDGET.get(expansion.stopped_by, stopped_by)
+    if expansion is not None and expansion.queries_failed:
+        # Skipping a dead request keeps the fan-out alive, but the keywords it
+        # would have found are simply absent. Without this the result reads as
+        # a small niche rather than a source that was failing.
+        context.warnings.append(
+            f"{expansion.queries_failed} of {expansion.queries_executed} Autocomplete requests "
+            "failed and were skipped; the keywords they would have returned are missing."
+        )
     return ResearchData(
         scenario=scenario,
         input=input_value,

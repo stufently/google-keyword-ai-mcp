@@ -41,3 +41,9 @@ Every safeguard is checked before the next request. Reaching one returns the
 keywords collected so far as a partial result; it is an intentional stop, not an
 error. A failed non-initial request is skipped, while failure of the first direct
 seed request is reported to the caller.
+
+Skipping keeps one dead query from sinking a fan-out of a hundred, but it is
+not free: the keywords that request would have found are simply absent, and
+nothing in the returned list says so. `stats.queries_failed` counts the skipped
+requests, and a result built on any of them is reported as partial — otherwise
+a source that was failing looks exactly like a niche that is small.

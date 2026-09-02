@@ -145,10 +145,28 @@ def run_expand(
             completeness=Completeness.EMPTY,
             completeness_reason="no keywords",
         )
+    # A skipped request costs keywords that were never collected, so a result
+    # built on failures is thinner than it looks and must not read as whole.
+    failures = (
+        []
+        if not stats.queries_failed
+        else [
+            f"{stats.queries_failed} of {stats.queries_executed} Autocomplete requests failed "
+            "and were skipped; the keywords they would have returned are missing."
+        ]
+    )
     if stats.stopped_by in BUDGET_STOPS:
         return Envelope(
             data=data,
+            warnings=failures,
             completeness=Completeness.PARTIAL,
             completeness_reason=f"stopped by {stats.stopped_by}",
+        )
+    if failures:
+        return Envelope(
+            data=data,
+            warnings=failures,
+            completeness=Completeness.PARTIAL,
+            completeness_reason=failures[0],
         )
     return Envelope(data=data)

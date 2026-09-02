@@ -18,7 +18,7 @@ import anyio
 import pytest
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, Tool
 
 from google_keyword_ai.config import Settings
 from google_keyword_ai.mcp.server import build_server
@@ -134,3 +134,60 @@ def test_a_refused_request_still_prints_an_envelope_and_exits_one(
     assert envelope["completeness_reason"] == reason
     assert envelope["errors"] == [reason]
     assert "Traceback" not in completed.stderr
+
+
+def list_tools(data_dir: Path) -> dict[str, Tool]:
+    server = build_server(Settings(data_dir=data_dir))
+
+    async def exercise() -> dict[str, Tool]:
+        async with (
+            create_client_server_memory_streams() as (
+                (client_read, client_write),
+                (server_read, server_write),
+            ),
+            anyio.create_task_group() as task_group,
+        ):
+            low_level_server = server._lowlevel_server
+
+            async def run_server() -> None:
+                await low_level_server.run(
+                    server_read,
+                    server_write,
+                    low_level_server.create_initialization_options(),
+                    raise_exceptions=False,
+                )
+
+            task_group.start_soon(run_server)
+            async with ClientSession(client_read, client_write) as client:
+                await client.initialize()
+                listing = await client.list_tools()
+            task_group.cancel_scope.cancel()
+        return {tool.name: tool for tool in listing.tools}
+
+    return anyio.run(exercise)
+
+
+def test_the_error_guard_leaves_the_published_schemas_alone(
+    thread_offload: None, tmp_path: Path
+) -> None:
+    """The guard wraps every tool, and a wrapper is exactly how schemas get lost.
+
+    The SDK reads a tool's arguments from the function signature and its output
+    from the return annotation. A wrapper that hid either would publish a tool
+    taking no arguments, and nothing else in the suite states that the
+    parameters survived.
+    """
+    tools = list_tools(tmp_path)
+
+    assert len(tools) == 14
+    suggest = tools["suggest_keywords"]
+    assert sorted(suggest.input_schema["properties"]) == ["country", "language", "limit", "query"]
+    assert suggest.input_schema["required"] == ["query"]
+
+    score = tools["score_run"]
+    assert sorted(score.input_schema["properties"]) == ["limit", "run_id"]
+    output = score.output_schema
+    assert output is not None
+    assert output["properties"]["data"]["anyOf"][-1] == {"type": "null"}, (
+        "the published schema has to admit the empty answer the tool can return"
+    )

@@ -153,3 +153,58 @@ def test_limit_only_slices_keywords_not_stats(
 
     assert [keyword.normalized for keyword in envelope.data.keywords] == ["one"]
     assert envelope.data.stats == stats
+
+
+def test_failed_requests_make_the_result_partial_and_say_how_many(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Skipping a dead request keeps the fan-out alive; hiding it invents a small niche.
+
+    Nothing about the returned keywords distinguishes a seed with few
+    variations from a source that failed eighty times, so a result built on
+    skipped requests must say so rather than report itself whole.
+    """
+    monkeypatch.setattr(
+        expand_usecase,
+        "_fetch_expansion",
+        _stub_result(
+            [_candidate("one")],
+            ExpansionStats(queries_executed=88, depth_reached=0, queries_failed=80),
+        ),
+    )
+
+    envelope = expand_usecase.run_expand(Settings(data_dir=data_dir), "seed")
+
+    assert envelope.completeness is Completeness.PARTIAL
+    assert envelope.completeness_reason is not None
+    assert "80 of 88" in envelope.completeness_reason
+    assert envelope.warnings == [envelope.completeness_reason]
+
+
+def test_a_budget_stop_keeps_its_reason_and_still_reports_the_failures(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two different things went wrong, and the reader needs both.
+
+    The budget stop is why collection ended; the failures are why what was
+    collected is thinner than the budget would suggest.
+    """
+    monkeypatch.setattr(
+        expand_usecase,
+        "_fetch_expansion",
+        _stub_result(
+            [_candidate("one")],
+            ExpansionStats(
+                queries_executed=10,
+                depth_reached=0,
+                stopped_by="max_queries",
+                queries_failed=3,
+            ),
+        ),
+    )
+
+    envelope = expand_usecase.run_expand(Settings(data_dir=data_dir), "seed")
+
+    assert envelope.completeness is Completeness.PARTIAL
+    assert envelope.completeness_reason == "stopped by max_queries"
+    assert "3 of 10" in envelope.warnings[0]

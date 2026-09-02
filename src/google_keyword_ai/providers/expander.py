@@ -33,6 +33,14 @@ class ExpansionStats(BaseModel):
     queries_executed: int
     depth_reached: int
     stopped_by: str | None = None
+    queries_failed: int = 0
+    """Requests that failed and were skipped.
+
+    Skipping is deliberate -- one dead query must not sink a fan-out of a
+    hundred -- but skipping in silence is not: eighty failures out of
+    eighty-eight leave a thin result that still looks whole. The count is what
+    lets the caller tell "the niche is small" from "the source was down".
+    """
 
 
 class KeywordExpander:
@@ -49,6 +57,7 @@ class KeywordExpander:
     ) -> tuple[list[KeywordCandidate], ExpansionStats]:
         started_at = anyio.current_time()
         queries_executed = 0
+        queries_failed = 0
         depth_reached = 0
         all_candidates: list[KeywordCandidate] = []
         unique_candidates: set[str] = set()
@@ -81,6 +90,7 @@ class KeywordExpander:
                             queries_executed=queries_executed,
                             depth_reached=depth_reached,
                             stopped_by=stopped_by,
+                            queries_failed=queries_failed,
                         )
 
                     queries_executed += 1
@@ -89,6 +99,7 @@ class KeywordExpander:
                     except GkaiError:
                         if current_depth == 0 and current_seed == seed and strategy_name == "seed":
                             raise
+                        queries_failed += 1
                         continue
 
                     source = f"autocomplete:{strategy_name}:{query_text}"
@@ -121,6 +132,7 @@ class KeywordExpander:
                     queries_executed=queries_executed,
                     depth_reached=depth_reached,
                     stopped_by="max_depth",
+                    queries_failed=queries_failed,
                 )
             current_seeds = next_seeds
             current_depth += 1
@@ -129,4 +141,5 @@ class KeywordExpander:
             queries_executed=queries_executed,
             depth_reached=depth_reached,
             stopped_by=None,
+            queries_failed=queries_failed,
         )

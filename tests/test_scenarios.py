@@ -32,10 +32,12 @@ class FakeExpander:
         log: list[str],
         candidates: list[KeywordCandidate],
         stopped_by: str | None = None,
+        queries_failed: int = 0,
     ) -> None:
         self.log = log
         self.candidates = candidates
         self.stopped_by = stopped_by
+        self.queries_failed = queries_failed
 
     async def expand(
         self,
@@ -47,7 +49,10 @@ class FakeExpander:
         del seed, market, strategies
         self.log.append("autocomplete")
         return self.candidates, ExpansionStats(
-            queries_executed=3, depth_reached=0, stopped_by=self.stopped_by
+            queries_executed=3,
+            depth_reached=0,
+            stopped_by=self.stopped_by,
+            queries_failed=self.queries_failed,
         )
 
 
@@ -486,5 +491,28 @@ def test_a_keyword_budget_is_a_cut_only_when_it_actually_truncates(
 
         assert len(data.keywords) == 10
         assert data.stats.stopped_by == expected
+
+    anyio.run(exercise)
+
+
+def test_skipped_autocomplete_requests_reach_the_research_warnings(settings: Settings) -> None:
+    """A research run has to inherit what the expansion quietly survived.
+
+    The expander skips a failed request on purpose, but the keywords it would
+    have found are missing all the same. Without the count the run reports a
+    healthy, merely small result.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        context = _context(
+            settings,
+            log=log,
+            expander=FakeExpander(log, _candidates(2), queries_failed=2),
+        )
+
+        await NewNicheResearch("seed").run(context)
+
+        assert any("2 of 3 Autocomplete requests failed" in warning for warning in context.warnings)
 
     anyio.run(exercise)

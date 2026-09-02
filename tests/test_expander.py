@@ -195,6 +195,7 @@ def test_non_seed_failure_is_skipped(data_dir: Path) -> None:
 
     assert stats.queries_executed == 3
     assert [keyword.normalized for keyword in keywords] == ["survivor"]
+    assert stats.queries_failed == 1, "a skipped request has to be counted, not just survived"
 
 
 def test_seed_failure_is_raised(data_dir: Path) -> None:
