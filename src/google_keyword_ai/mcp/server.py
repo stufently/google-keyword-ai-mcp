@@ -4,6 +4,11 @@ from google_keyword_ai import __version__
 from google_keyword_ai.config import Settings, load_settings
 from google_keyword_ai.envelope import Envelope
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.usecases.ads import (
+    AdsData,
+    run_ads_historical,
+    run_competitor,
+)
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
 from google_keyword_ai.usecases.expand import ExpandData, run_expand
 from google_keyword_ai.usecases.suggest import SuggestData, run_suggest
@@ -74,6 +79,36 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             language=language,
             country=country,
             timeframe=timeframe,
+        )
+
+    @server.tool()
+    def get_keyword_metrics(
+        keywords: list[str],
+        language: str | None = None,
+        country: str | None = None,
+    ) -> Envelope[AdsData]:
+        return run_ads_historical(
+            active_settings,
+            keywords,
+            language=language,
+            country=country,
+        )
+
+    @server.tool()
+    def analyze_competitor(
+        target: str,
+        seed_keyword: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+        limit: int | None = None,
+    ) -> Envelope[AdsData]:
+        return run_competitor(
+            active_settings,
+            target,
+            seed_keyword=seed_keyword,
+            language=language,
+            country=country,
+            limit=limit,
         )
 
     return server

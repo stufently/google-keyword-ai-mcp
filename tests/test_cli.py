@@ -21,7 +21,9 @@ from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
+from google_keyword_ai.providers.google_ads import KeywordIdea, KeywordMetrics
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
+from google_keyword_ai.usecases.ads import AdsData
 from google_keyword_ai.usecases.doctor import run_doctor
 from google_keyword_ai.usecases.expand import ExpandData
 from google_keyword_ai.usecases.trends import TrendsData
@@ -392,3 +394,132 @@ def test_doctor_reports_trends_disabled_by_kill_switch(tmp_path: Path) -> None:
         "available": False,
         "detail": "disabled by configuration",
     }
+
+
+def _ads_envelope(mode: str) -> Envelope[AdsData]:
+    return Envelope(
+        data=AdsData(
+            provider=ProviderInfo(name="google_ads", official=True, stability="stable"),
+            mode=mode,
+            language="en",
+            country="US",
+            ideas=[
+                KeywordIdea(
+                    text="keyword idea",
+                    metrics=KeywordMetrics(
+                        avg_monthly_searches=100,
+                        competition="MEDIUM",
+                    ),
+                )
+            ],
+        )
+    )
+
+
+def test_ads_ideas_cli_forwards_seed_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "ads-ideas")
+    captured: dict[str, object] = {}
+
+    def fake_run_ads_ideas(
+        active_settings: Settings,
+        keywords: list[str] | None,
+        **kwargs: object,
+    ) -> Envelope[AdsData]:
+        captured["settings"] = active_settings
+        captured["keywords"] = keywords
+        captured.update(kwargs)
+        return _ads_envelope("keyword_and_url_seed")
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_ads_ideas", fake_run_ads_ideas)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "ads",
+            "ideas",
+            "seed",
+            "--url",
+            "https://example.com/page",
+            "--include-adult",
+            "--limit",
+            "1",
+            "--language",
+            "en",
+            "--country",
+            "US",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["data"]["ideas"][0]["text"] == "keyword idea"
+    assert captured["keywords"] == ["seed"]
+    assert captured["url"] == "https://example.com/page"
+    assert captured["include_adult"] is True
+    assert captured["limit"] == 1
+
+
+def test_ads_historical_cli_forwards_keywords(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = Settings(data_dir=tmp_path / "ads-historical")
+    captured: dict[str, object] = {}
+
+    def fake_run_historical(
+        active_settings: Settings,
+        keywords: list[str],
+        **kwargs: object,
+    ) -> Envelope[AdsData]:
+        captured["settings"] = active_settings
+        captured["keywords"] = keywords
+        captured.update(kwargs)
+        return _ads_envelope("historical_metrics")
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_ads_historical", fake_run_historical)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        ["ads", "historical", "one", "two", "--language", "en", "--country", "US"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["keywords"] == ["one", "two"]
+    assert captured["language"] == "en"
+
+
+def test_competitor_cli_forwards_target(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(data_dir=tmp_path / "competitor")
+    captured: dict[str, object] = {}
+
+    def fake_run_competitor(
+        active_settings: Settings,
+        target: str,
+        **kwargs: object,
+    ) -> Envelope[AdsData]:
+        captured["settings"] = active_settings
+        captured["target"] = target
+        captured.update(kwargs)
+        return _ads_envelope("keyword_and_url_seed")
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_competitor", fake_run_competitor)
+
+    result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "competitor",
+            "https://example.com/page",
+            "--seed-keyword",
+            "seed",
+            "--limit",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["target"] == "https://example.com/page"
+    assert captured["seed_keyword"] == "seed"
+    assert captured["limit"] == 5

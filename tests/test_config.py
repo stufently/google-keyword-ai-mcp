@@ -103,3 +103,27 @@ def test_trends_settings_defaults() -> None:
 def test_trends_settings_reject_invalid_limits(field: str, value: int) -> None:
     with pytest.raises(InvalidConfigurationError):
         Settings.model_validate({field: value})
+
+
+def test_google_ads_settings_defaults() -> None:
+    settings = Settings()
+
+    assert settings.google_ads_api_version == "v25"
+    assert settings.google_ads_rate_limit_per_second == 1.0
+    assert settings.google_ads_ideas_cache_ttl_seconds == 604800
+    assert settings.google_ads_historical_cache_ttl_seconds == 2592000
+    assert settings.google_ads_page_size == 1000
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "google_ads_rate_limit_per_second",
+        "google_ads_ideas_cache_ttl_seconds",
+        "google_ads_historical_cache_ttl_seconds",
+        "google_ads_page_size",
+    ],
+)
+def test_google_ads_settings_reject_non_positive_values(field: str) -> None:
+    with pytest.raises(InvalidConfigurationError):
+        Settings.model_validate({field: 0})

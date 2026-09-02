@@ -22,7 +22,10 @@ from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
+from google_keyword_ai.providers.google_ads import KeywordIdea, KeywordMetrics
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
+from google_keyword_ai.usecases.ads import AdsData
+from google_keyword_ai.usecases.doctor import run_doctor
 from google_keyword_ai.usecases.expand import ExpandData
 from google_keyword_ai.usecases.trends import TrendsData
 
@@ -344,3 +347,96 @@ def test_analyze_trends_tool_is_synchronous(thread_offload: None) -> None:
     tool = server._tool_manager.get_tool("analyze_trends")
     assert tool is not None
     assert tool.is_async is False
+
+
+def test_get_keyword_metrics_has_usecase_parity(
+    thread_offload: None,
+    monkeypatch: object,
+) -> None:
+    from pytest import MonkeyPatch
+
+    assert isinstance(monkeypatch, MonkeyPatch)
+    settings = Settings()
+    expected = Envelope(
+        data=AdsData(
+            provider=ProviderInfo(name="google_ads", official=True, stability="stable"),
+            mode="historical_metrics",
+            language="en",
+            country="US",
+            ideas=[
+                KeywordIdea(
+                    text="keyword",
+                    metrics=KeywordMetrics(
+                        avg_monthly_searches=100,
+                        competition="LOW",
+                    ),
+                )
+            ],
+        )
+    )
+
+    def fake_run_historical(
+        _settings: Settings,
+        keywords: list[str],
+        **_kwargs: object,
+    ) -> Envelope[AdsData]:
+        assert keywords == ["keyword"]
+        return expected
+
+    monkeypatch.setattr(mcp_server, "run_ads_historical", fake_run_historical)
+    server = build_server(settings)
+
+    async def call_metrics() -> dict[str, object]:
+        async with (
+            create_client_server_memory_streams() as (
+                (client_read, client_write),
+                (server_read, server_write),
+            ),
+            anyio.create_task_group() as task_group,
+        ):
+            low_level_server = server._lowlevel_server
+
+            async def run_server() -> None:
+                await low_level_server.run(
+                    server_read,
+                    server_write,
+                    low_level_server.create_initialization_options(),
+                    raise_exceptions=True,
+                )
+
+            task_group.start_soon(run_server)
+            async with ClientSession(client_read, client_write) as client:
+                await client.initialize()
+                result = await client.call_tool(
+                    "get_keyword_metrics",
+                    {"keywords": ["keyword"], "language": "en", "country": "US"},
+                )
+            task_group.cancel_scope.cancel()
+
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    assert anyio.run(call_metrics) == expected.to_wire()
+
+
+def test_google_ads_tools_are_synchronous() -> None:
+    server = build_server(Settings())
+
+    metrics = server._tool_manager.get_tool("get_keyword_metrics")
+    competitor = server._tool_manager.get_tool("analyze_competitor")
+
+    assert metrics is not None
+    assert metrics.is_async is False
+    assert competitor is not None
+    assert competitor.is_async is False
+
+
+def test_doctor_reports_google_ads_missing_credentials(tmp_path: Path) -> None:
+    envelope = run_doctor(Settings(data_dir=tmp_path / "doctor"))
+
+    google_ads = next(
+        provider for provider in envelope.data.providers if provider.name == "google_ads"
+    )
+    assert google_ads.available is False
+    assert google_ads.detail == "missing credentials"

@@ -8,6 +8,7 @@ from google_keyword_ai import __version__
 from google_keyword_ai.config import Settings, masked_dump
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.errors import GkaiError
+from google_keyword_ai.providers.google_ads import GoogleAdsProvider
 from google_keyword_ai.providers.trends.provider import GoogleTrendsProvider
 from google_keyword_ai.storage.engine import open_database
 from google_keyword_ai.storage.migrations import SCHEMA_VERSION
@@ -29,11 +30,12 @@ class DoctorData(BaseModel):
 
 
 def _provider_statuses(settings: Settings) -> list[ProviderStatus]:
-    google_ads_detail = (
-        "not implemented yet (M4)"
-        if settings.google_ads_developer_token is not None
-        else "missing credentials"
+    google_ads_provider = GoogleAdsProvider(
+        settings=settings,
+        cache=None,
+        rate_limiter=None,
     )
+    google_ads_available = google_ads_provider.is_available()
     search_console_detail = (
         "not implemented yet (M5)"
         if settings.search_console_credentials_path is not None
@@ -47,7 +49,11 @@ def _provider_statuses(settings: Settings) -> list[ProviderStatus]:
             available=trends_available,
             detail="ready (unofficial)" if trends_available else "disabled by configuration",
         ),
-        ProviderStatus(name="google_ads", available=False, detail=google_ads_detail),
+        ProviderStatus(
+            name="google_ads",
+            available=google_ads_available,
+            detail="ready" if google_ads_available else "missing credentials",
+        ),
         ProviderStatus(name="search_console", available=False, detail=search_console_detail),
     ]
 

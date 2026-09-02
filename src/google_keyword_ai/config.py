@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     google_ads_client_id: SecretStr | None = None
     google_ads_client_secret: SecretStr | None = None
     google_ads_refresh_token: SecretStr | None = None
+    google_ads_api_version: str = "v25"
+    google_ads_rate_limit_per_second: float = 1.0
+    google_ads_ideas_cache_ttl_seconds: int = 604800
+    google_ads_historical_cache_ttl_seconds: int = 2592000
+    google_ads_page_size: int = 1000
     search_console_credentials_path: Path | None = None
 
     @field_validator("log_level")
@@ -69,6 +74,7 @@ class Settings(BaseSettings):
         "http_timeout_seconds",
         "autocomplete_rate_limit_per_second",
         "trends_pacing_seconds",
+        "google_ads_rate_limit_per_second",
     )
     @classmethod
     def validate_positive_float(cls, value: float) -> float:
@@ -88,6 +94,17 @@ class Settings(BaseSettings):
     def validate_positive_trends_ttl(cls, value: int) -> int:
         if value <= 0:
             raise InvalidConfigurationError("trends_cache_ttl_seconds must be positive.")
+        return value
+
+    @field_validator(
+        "google_ads_ideas_cache_ttl_seconds",
+        "google_ads_historical_cache_ttl_seconds",
+        "google_ads_page_size",
+    )
+    @classmethod
+    def validate_positive_google_ads_integer(cls, value: int) -> int:
+        if value <= 0:
+            raise InvalidConfigurationError("Google Ads limits and cache TTLs must be positive.")
         return value
 
     @field_validator("trends_circuit_breaker_failures")

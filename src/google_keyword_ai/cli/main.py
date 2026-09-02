@@ -8,6 +8,7 @@ from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.usecases.ads import run_ads_historical, run_ads_ideas, run_competitor
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
 from google_keyword_ai.usecases.suggest import run_suggest
@@ -15,7 +16,9 @@ from google_keyword_ai.usecases.trends import run_trends, run_trends_compare
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+ads_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(config_app, name="config")
+app.add_typer(ads_app, name="ads")
 
 
 class OutputFormat(StrEnum):
@@ -151,6 +154,78 @@ def trends(
             language=language,
             country=country,
             timeframe=timeframe,
+        ),
+        output_format,
+    )
+
+
+@ads_app.command("ideas")
+def ads_ideas(
+    keywords: Annotated[list[str] | None, typer.Argument()] = None,
+    url: Annotated[str | None, typer.Option("--url")] = None,
+    site: Annotated[str | None, typer.Option("--site")] = None,
+    include_adult: Annotated[bool, typer.Option("--include-adult")] = False,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_ads_ideas(
+            settings,
+            keywords,
+            url=url,
+            site=site,
+            include_adult=include_adult,
+            limit=limit,
+            language=language,
+            country=country,
+        ),
+        output_format,
+    )
+
+
+@ads_app.command("historical")
+def ads_historical(
+    keywords: Annotated[list[str], typer.Argument()],
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_ads_historical(
+            settings,
+            keywords,
+            language=language,
+            country=country,
+        ),
+        output_format,
+    )
+
+
+@app.command()
+def competitor(
+    target: str,
+    seed_keyword: Annotated[str | None, typer.Option("--seed-keyword")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    limit: Annotated[int | None, typer.Option("--limit")] = None,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(
+        run_competitor(
+            settings,
+            target,
+            seed_keyword=seed_keyword,
+            language=language,
+            country=country,
+            limit=limit,
         ),
         output_format,
     )

@@ -25,6 +25,50 @@ COUNTRY_ALPHA3: dict[str, str] = {
     "BR": "BRA",
 }
 
+# Official Google Ads geotargets-2026-08-12.csv, captured 2026-09-02.
+ADS_COUNTRY_CRITERIA: dict[str, int] = {
+    "AE": 2784,
+    "BR": 2076,
+    "BY": 2112,
+    "CN": 2156,
+    "DE": 2276,
+    "ES": 2724,
+    "FR": 2250,
+    "GB": 2826,
+    "IN": 2356,
+    "IT": 2380,
+    "JP": 2392,
+    "KZ": 2398,
+    "PL": 2616,
+    "RU": 2643,
+    "TH": 2764,
+    "TR": 2792,
+    "UA": 2804,
+    "US": 2840,
+}
+
+# Official Google Ads codes-formats page, captured 2026-09-02.
+# The project's single `zh` code maps deliberately to Google's zh_CN constant.
+ADS_LANGUAGE_CONSTANTS: dict[str, int] = {
+    "ar": 1019,
+    "de": 1001,
+    "en": 1000,
+    "es": 1003,
+    "fr": 1002,
+    "hi": 1023,
+    "it": 1004,
+    "ja": 1005,
+    "pl": 1030,
+    "pt": 1014,
+    "ru": 1031,
+    "th": 1044,
+    "tr": 1037,
+    "uk": 1036,
+    "zh": 1017,
+    "zh_CN": 1017,
+    "zh_TW": 1018,
+}
+
 SUPPORTED_LANGUAGES: frozenset[str] = frozenset(
     {"ru", "en", "th", "de", "fr", "es", "it", "kk", "uk", "pl", "tr", "ar", "zh", "ja", "hi", "pt"}
 )
@@ -70,4 +114,23 @@ class Market(BaseModel):
         return COUNTRY_ALPHA3[self.country].lower()
 
     def ads_criteria_id(self) -> int:
-        raise ProviderUnavailableError("Google Ads criteria ID table is not available until M4.")
+        try:
+            return ADS_COUNTRY_CRITERIA[self.country]
+        except KeyError as exc:
+            raise ProviderUnavailableError(
+                f"Google Ads has no configured criteria ID for country {self.country}."
+            ) from exc
+
+    def ads_language_id(self) -> int:
+        try:
+            return ADS_LANGUAGE_CONSTANTS[self.language]
+        except KeyError as exc:
+            raise ProviderUnavailableError(
+                f"Google Ads has no language constant for language {self.language}."
+            ) from exc
+
+    def ads_geo_target_resource(self) -> str:
+        return f"geoTargetConstants/{self.ads_criteria_id()}"
+
+    def ads_language_resource(self) -> str:
+        return f"languageConstants/{self.ads_language_id()}"

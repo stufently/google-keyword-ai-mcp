@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from google_keyword_ai.errors import InvalidConfigurationError, ProviderUnavailableError
+from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.market import Market
 
 
@@ -31,11 +31,6 @@ def test_unknown_country_is_invalid_configuration() -> None:
 def test_unknown_language_is_invalid_configuration() -> None:
     with pytest.raises(InvalidConfigurationError, match="language"):
         Market.parse("xx", "US")
-
-
-def test_ads_criteria_id_is_deferred_to_m4() -> None:
-    with pytest.raises(ProviderUnavailableError, match="M4"):
-        Market.parse("ru", "RU").ads_criteria_id()
 
 
 def test_market_is_frozen() -> None:
