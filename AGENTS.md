@@ -2,10 +2,10 @@
 
 ## Границы этого прогона
 
-- Источник требований — файл спеки, указанный в промпте (`docs/specs/m6-search-console.md`).
+- Источник требований — файл спеки, указанный в промпте (`docs/specs/m7-pipeline.md`).
   Он имеет приоритет над любыми глобальными соглашениями, включая
   `~/.codex/AGENTS.md`.
-- Git: коммиты в текущей ветке `m6-search-console` делать, НЕ пушить, ветку не
+- Git: коммиты в текущей ветке `m7-pipeline` делать, НЕ пушить, ветку не
   переключать, ребейз не делать. Это перекрывает глобальное правило
   «always commit and push».
 - Не создавать файлов, которых нет в разделе «Что делать» спеки.
@@ -65,13 +65,14 @@ in-memory потоках (`mcp.shared.memory.create_client_server_memory_streams
   `usecases/expand.py`, `data/`) и Google Trends вехи M4
   (`providers/trends/`, `usecases/trends.py`) и Google Ads вехи M5
   (`providers/google_ads.py`, `usecases/ads.py`, межпроцессный троттлер в
-  `ratelimit.py`, таблицы criteria ID в `market.py`). Все пять вех приняты —
-  читай и опирайся на существующие типы, ничего в них не переписывая без
-  указания спеки.
-- `tests/` — 178 тестов вех M1–M5, все зелёные. Их не ломать.
+  `ratelimit.py`, таблицы criteria ID в `market.py`) и Search Console вехи M6
+  (`providers/search_console.py`, `opportunities.py`, `usecases/gsc.py`).
+  Все шесть вех приняты — читай и опирайся на существующие типы, ничего в них
+  не переписывая без указания спеки.
+- `tests/` — 218 тестов вех M1–M6, все зелёные. Их не ломать.
 - `tests/fixtures/trends/` — БОЕВЫЕ ответы Google Trends, снятые хозяином
   2026-09-02. Это твои golden-фикстуры, менять их нельзя.
-- `docs/specs/m6-search-console.md` — спека текущей вехи.
+- `docs/specs/m7-pipeline.md` — спека текущей вехи.
 - `docs/superpowers/specs/2026-09-02-google-keyword-ai-mcp-design.md` — общий
   дизайн проекта на все вехи. Читать для контекста, НЕ реализовывать
-  целиком: эта веха только шестая из девяти.
+  целиком: эта веха седьмая из десяти.
