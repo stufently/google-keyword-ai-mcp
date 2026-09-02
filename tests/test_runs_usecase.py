@@ -165,6 +165,7 @@ def test_resume_does_not_replay_valid_stages(
     )
     resumed = run_resume(settings, record.run_id)
     assert resumed.run_id == record.run_id
+    assert resumed.data is not None
     assert resumed.data.keywords[0].keyword == "topic one"
 
 
@@ -257,6 +258,7 @@ def test_resume_of_a_run_interrupted_before_its_envelope_admits_the_gap(
         "The interrupted run was restored from stage checkpoints; "
         "any warnings from the original attempt are unavailable."
     ]
+    assert resumed.data is not None
     assert resumed.data.keywords, "the checkpointed keywords are still returned"
 
 
@@ -412,6 +414,7 @@ def test_resume_applies_the_stored_result_limit(
     )
     resumed = run_resume(settings, record.run_id)
 
+    assert resumed.data is not None
     assert [keyword.keyword for keyword in resumed.data.keywords] == ["topic one"]
 
 

@@ -20,9 +20,16 @@ from google_keyword_ai.usecases.research import (
 )
 
 
-def _missing[T](run_id: str) -> Envelope[T]:
+def _missing[T](run_id: str) -> Envelope[T | None]:
+    """Answer that the run does not exist, which is an answer and not a crash.
+
+    The return types say `| None` because that is what this produces. A type
+    that cannot express `data: null` compiles happily and then breaks the day
+    the function is put behind an interface that validates its output against
+    it -- which is exactly how the analysis tools lost their empty answer.
+    """
     return cast(
-        Envelope[T],
+        Envelope[T | None],
         Envelope(
             data=None,
             completeness=Completeness.EMPTY,
@@ -53,7 +60,7 @@ def _stored_diagnostics(
     return warnings, errors
 
 
-def run_show(settings: Settings, run_id: str) -> Envelope[RunRecord]:
+def run_show(settings: Settings, run_id: str) -> Envelope[RunRecord | None]:
     engine = open_database(settings)
     try:
         record = RunStore(engine).get(run_id)
@@ -73,7 +80,7 @@ def run_list(settings: Settings, *, limit: int = 20) -> Envelope[list[RunRecord]
     return Envelope(data=records)
 
 
-def run_export(settings: Settings, run_id: str) -> Envelope[dict[str, object]]:
+def run_export(settings: Settings, run_id: str) -> Envelope[dict[str, object] | None]:
     engine = open_database(settings)
     try:
         record = RunStore(engine).get(run_id)
@@ -90,7 +97,7 @@ def run_export(settings: Settings, run_id: str) -> Envelope[dict[str, object]]:
     )
 
 
-async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[ResearchData]:
+async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[ResearchData | None]:
     engine = open_database(settings)
     try:
         store = RunStore(engine)
@@ -151,12 +158,12 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
                     app_version=__version__,
                     parser_version=PARSER_VERSION,
                 )
-            return envelope
+            return cast("Envelope[ResearchData | None]", envelope)
     finally:
         engine.dispose()
 
 
-def run_resume(settings: Settings, run_id: str) -> Envelope[ResearchData]:
+def run_resume(settings: Settings, run_id: str) -> Envelope[ResearchData | None]:
     engine = open_database(settings)
     try:
         record = RunStore(engine).get(run_id)
@@ -167,7 +174,7 @@ def run_resume(settings: Settings, run_id: str) -> Envelope[ResearchData]:
     return anyio.run(partial(_resume_async, settings, record))
 
 
-def run_rerun(settings: Settings, run_id: str) -> Envelope[ResearchData]:
+def run_rerun(settings: Settings, run_id: str) -> Envelope[ResearchData | None]:
     engine = open_database(settings)
     try:
         record = RunStore(engine).get(run_id)
@@ -186,4 +193,4 @@ def run_rerun(settings: Settings, run_id: str) -> Envelope[ResearchData]:
         limit=record.limit,
         save_run=True,
     )
-    return cast(Envelope[ResearchData], result)
+    return cast("Envelope[ResearchData | None]", result)
