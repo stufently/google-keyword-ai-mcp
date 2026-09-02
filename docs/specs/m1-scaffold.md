@@ -335,7 +335,22 @@ MCP-сервер на `MCPServer` (см. «Проверенные факты» �
 - `tests/test_envelope.py` — `to_wire`, требование `completeness_reason`.
 - `tests/test_storage.py` — PRAGMA, создание таблицы, идемпотентность
   миграций, отказ на БД из будущего.
-- `tests/test_cli.py` — чистота stdout, коды возврата, маскирование.
+- `tests/test_cli.py` — запускает CLI отдельным процессом через
+  `subprocess.run([sys.executable, "-m", "google_keyword_ai.cli.main", ...])`
+  либо через путь к скрипту `gkai`, и проверяет:
+  - `test_doctor_json_envelope` — stdout разбирается как ОДИН JSON-объект, в
+    нём есть `schema_version` (равен `1.0.0`), `data`, `warnings`, `errors`,
+    `completeness`, а `data["providers"]` содержит ровно четыре записи;
+  - `test_stdout_clean_with_debug_logs` — при `GKAI_LOG_LEVEL=debug` stdout
+    по-прежнему разбирается как JSON, а stderr при этом НЕ пуст (лог пишется,
+    но не в stdout);
+  - `test_config_show_masks_secrets` — при заданном через окружение
+    `GKAI_GOOGLE_ADS_DEVELOPER_TOKEN` его значение не встречается ни в stdout,
+    ни в stderr;
+  - коды возврата: `0` при `completeness=complete`.
+
+  Имена тестов важны: по ним отбираются критерии приёмки
+  (`-k doctor_json`, `-k stdout_clean`, `-k mask`).
 - `tests/test_mcp_parity.py` — parity-тест CLI ↔ MCP на in-memory потоках.
 
 Тесты асинхронного MCP писать через `anyio.run(...)` внутри обычной
@@ -381,10 +396,10 @@ MCP-сервер на `MCPServer` (см. «Проверенные факты» �
 - **AC-004.** `gkai doctor --format json` печатает в stdout ровно один
   JSON-объект, в котором есть ключи `schema_version`, `data`, `warnings`,
   `errors`, `completeness`, а `data` содержит `providers` из четырёх записей.
-  Проверка: `.venv/bin/gkai doctor --format json | .venv/bin/python -c "import sys,json; d=json.load(sys.stdin); assert d['schema_version']=='1.0.0'; assert set(['schema_version','data','warnings','errors','completeness'])<=set(d); assert len(d['data']['providers'])==4; print('ok')"`
+  Проверка: `.venv/bin/pytest -q tests/test_cli.py -k doctor_json`
 - **AC-005.** Логи не попадают в stdout даже на уровне debug: stdout остаётся
-  разбираемым JSON.
-  Проверка: `GKAI_LOG_LEVEL=debug .venv/bin/gkai doctor --format json 2>/dev/null | .venv/bin/python -c "import sys,json; json.load(sys.stdin); print('ok')"`
+  разбираемым JSON, а сообщения лога видны в stderr.
+  Проверка: `.venv/bin/pytest -q tests/test_cli.py -k stdout_clean`
 - **AC-006.** Секреты маскируются: значение токена, заданного через окружение,
   не встречается в выводе `gkai config show`.
   Проверка: `.venv/bin/pytest -q tests/test_cli.py -k mask`
