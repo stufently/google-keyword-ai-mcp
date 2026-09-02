@@ -64,6 +64,25 @@ API-клиентов вообще; его работа — `gkai doctor --format
 Это нужно, чтобы один и тот же механизм работал из Claude Code, shell, cron, CI
 и других агентов.
 
+### Модель исполнения: ядро асинхронное
+
+MCP SDK асинхронный (anyio), Typer синхронный, официальный клиент `google-ads` —
+блокирующий gRPC. Если ядро сделать синхронным, MCP-сервер будет намертво
+блокировать stdio-транспорт на время внешних запросов.
+
+Поэтому: **ядро async-first**, HTTP-провайдеры на `httpx.AsyncClient`. CLI
+получает тонкий синхронный фасад через `asyncio.run()`. Блокирующие вызовы
+`google-ads` изолируются через `anyio.to_thread.run_sync()`.
+
+Граница зафиксирована в первой вехе, потому что смена модели исполнения позже
+означает переписывание всех провайдеров.
+
+### Контракт вывода версионируется
+
+Любой JSON, который отдают CLI (`--format json`) и MCP-инструменты, несёт в корне
+`schema_version`. Сериализация живёт в ядре и переиспользуется обеими обёртками —
+дублировать её в CLI и в MCP запрещено, иначе форматы разъедутся.
+
 ### Структура пакета
 
 ```
@@ -71,9 +90,10 @@ google_keyword_ai/
     config.py            конфиг и его загрузка
     errors.py            таксономия ошибок
     logging.py           structured logging в stderr
-    http.py              httpx-клиент: таймауты, retry, backoff+jitter, пул
+    http.py              httpx.AsyncClient: таймауты, retry, backoff+jitter, пул
     ratelimit.py         троттлеры на провайдер
     cache.py             слой кеша с TTL из конфига
+    locales.py           единая модель языка и региона, маппинг под провайдеров
     normalize.py         нормализация и дедупликация ключей
     models.py            pydantic-модели домена
     storage/             SQLAlchemy 2: схема, миграции, репозитории
@@ -106,7 +126,9 @@ data/
 | Пакетный менеджер | `uv` |
 | CLI | Typer 0.27.2 |
 | Модели/конфиг | Pydantic 2.13.5 + pydantic-settings |
-| HTTP | httpx 0.28.1 |
+| HTTP | httpx 0.28.1 (`AsyncClient`) |
+| Асинхронность | anyio (приходит с `mcp`) |
+| Логи | structlog 26.1.0 |
 | MCP | `mcp` 2.1.1 (официальный Python SDK) |
 | ORM | SQLAlchemy 2.0.52, SQLite по умолчанию |
 | Google Ads | `google-ads` 31.4.0 (официальный клиент) |
@@ -193,9 +215,24 @@ YouTube-семантика: тот же endpoint с `&ds=yt` (проверено
 надо срезать перед JSON-разбором; заголовки `user-agent`, `accept-language`,
 `referer`; интервал между widget-вызовами **~800 мс**.
 
-Провайдер помечает свои данные в provenance как `unofficial / unstable`. 429 →
-экспоненциальный backoff → честный `ProviderUnavailableError`, без попыток
-обхода.
+Три вещи, которые ломают наивную реализацию:
+
+1. **Срез префикса делать устойчиво.** Встречаются варианты без перевода строки
+   и с пробелами. Срезать по проверке префикса, а не по фиксированным пяти
+   символам.
+2. **Модели парсера — с необязательными узлами.** Для низкочастотных запросов
+   Trends возвращает пустые массивы или структуру вовсе без `timelineData`. Это
+   не ошибка, а штатный ответ: спайк 2026-09-02 на «аренда квартиры паттайя»
+   получил именно пустую таймсерию, тогда как «недвижимость» отдала 53 точки.
+   Пустой результат обязан доезжать до отчёта как «данных нет», а не как падение.
+3. **Быстрый отказ вместо зависания.** С датацентровых IP Google отдаёт 429
+   независимо от NID и пауз. Второй подряд 429 — сразу
+   `ProviderUnavailableError` с сохранением уже собранного прогресса
+   исследования, без бесконечных повторов. С этого хоста цепочка 2026-09-02
+   прошла без 429, но полагаться на это нельзя.
+
+Провайдер помечает свои данные в provenance как `unofficial / unstable`, без
+попыток обхода защиты.
 
 Архитектура обязана позволить добавить третий адаптер (например платный) без
 правки пайплайна.
@@ -283,10 +320,53 @@ keyword X
 Ads, помесячная история, competition и bids, трендовые поля, метрики GSC,
 `discovered_from`, `first_seen_at`, `last_seen_at`.
 
+## Язык и регион: одна модель, четыре формата
+
+Пользователь всегда пишет `--language ru --country RU`. Дальше каждый источник
+Google хочет своё, и это несовпадение обязано быть решено в ядре, а не в
+провайдерах:
+
+| Источник | Формат региона | Формат языка |
+|---|---|---|
+| Autocomplete | `gl=RU` (ISO 3166-1 alpha-2) | `hl=ru` |
+| Trends | `geo=RU`, субрегионы `geo=US-CA` | `hl=ru` |
+| Search Console | ISO 3166-1 **alpha-3** в нижнем регистре: `rus`, `tha` | — |
+| Google Ads | числовые ресурсы `geoTargetConstants/2643` | `languageConstants/1031` |
+
+Google Ads не принимает строку `"RU"` — только числовой criteria ID. Без общего
+слоя параметры CLI сломаются на M4 и M5, и чинить это придётся во всех
+провайдерах сразу.
+
+Поэтому `locales.py` появляется в первой вехе: единый тип «язык + регион», от
+него методы под каждый формат. В M1 реализуются alpha-2 → alpha-3 и языковые
+теги (данные детерминированные и небольшие). Таблица criteria ID для Google Ads
+подключается в M4, когда появится её потребитель; интерфейс к тому моменту уже
+стоит на месте.
+
 ## Хранилище, кеш, конфигурация
 
 **БД.** SQLite по умолчанию, путь по XDG Base Directory. Переопределяется
 `GKAI_DATA_DIR` и `DATABASE_URL` (последний открывает PostgreSQL).
+
+**Режим SQLite обязателен**, иначе рекурсивное расширение семантики и
+параллельная запись кеша дадут `database is locked`:
+
+```
+PRAGMA journal_mode=WAL
+PRAGMA busy_timeout=5000
+PRAGMA synchronous=NORMAL
+```
+
+**Миграции.** Alembic для локального инструмента избыточен. Версия схемы
+хранится в `PRAGMA user_version`, миграции — упорядоченный список
+forward-only функций, применяемых при открытии БД. Механизм заводится в M1,
+потому что каждая следующая веха добавляет таблицы, а база живёт у пользователя
+в `~/.local/share` и ломать её при обновлении нельзя.
+
+**Схема растёт вместе с потребителями.** В M1 создаётся только таблица кеша.
+Таблицы ключей, метрик и запусков появляются в тех вехах, где возникает тот, кто
+в них пишет: проектировать их заранее, не имея ни одного провайдера, — гарантия
+переписывания.
 
 **Кеш.** Все внешние вызовы идут через слой кеша. Ключ учитывает провайдера,
 endpoint, запрос, язык, страну, опции и версию API там, где она значима. TTL по
@@ -327,10 +407,15 @@ seed
  → Google Ads historical metrics
  → Google Trends, где доступен
  → Search Console enrichment, если передана property
- → scoring
- → clustering
+ → scoring        (подключается в M7)
+ → clustering     (подключается в M7)
  → report
 ```
+
+Порядок стадий окончательный, но две последние появляются позже самого
+пайплайна: в M6 `research` отдаёт плоский список, отсортированный по спросу, и
+только M7 вставляет в это место scoring и кластеризацию. Пайплайн обязан быть
+написан так, чтобы это была вставка стадии, а не переделка.
 
 Cheap-first соблюдается жёстко: в Google Ads уходит только то, что пережило
 дедуп и фильтр, а не все комбинации.
@@ -505,13 +590,13 @@ Google Shopping, Google News, SERP-overlap кластеризация, мони�
 
 | # | Веха | CLI | MCP |
 |---|---|---|---|
-| M1 | Каркас: uv/pyproject, config, storage, cache, HTTP + retry + rate limit, таксономия ошибок, логи в stderr | `doctor`, `config show` | сервер + `doctor` |
+| M1 | Каркас: config, `locales`, storage (только таблица кеша + миграции), cache, async HTTP + retry + rate limit, таксономия ошибок, логи в stderr, `schema_version` | `doctor`, `config show` | сервер + `doctor` |
 | M2 | Autocomplete, нормализация, дедупликация, fan-out, рекурсия с предохранителями | `suggest`, `expand` | `suggest_keywords`, `expand_keywords` |
 | M3 | Trends: неофициальный клиент + адаптер официального, capability detection | `trends`, `trends compare` | `analyze_trends` |
 | M4 | Google Ads: 4 вида seed, historical metrics, троттлинг 1 rps, длинный TTL | `ads ideas`, `ads historical`, `competitor` | `get_keyword_metrics`, `analyze_competitor` |
 | M5 | Search Console: OAuth, пагинация, opportunity mining | `gsc properties`, `gsc queries`, `gsc opportunities` | `find_gsc_opportunities` |
-| M6 | Пайплайн, runs, budget guard, dry-run, resume | `research`, `run show/export/resume/rerun` | `research_keywords` |
-| M7 | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
+| M6 | Пайплайн, runs, budget guard, dry-run, resume. Выдаёт плоский список, отсортированный по спросу, **без scoring и кластеров** | `research`, `run show/export/resume/rerun` | `research_keywords` |
+| M7 | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция. Подключает scoring и кластеры к пайплайну M6 | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
 | M8 | Claude Skill, evals, docs, README | — | — |
 
 После каждой вехи: `ruff check .`, `pytest`, проверка типов. Не переходить
