@@ -720,10 +720,10 @@ Google Shopping, Google News, SERP-overlap кластеризация, мони�
 | M4 ✅ | Trends: неофициальный клиент, kill switch, golden-фикстуры, circuit breaker, `normalization_scope` | `trends`, `trends compare` | `analyze_trends` |
 | M5 ✅ | Google Ads: 4 вида seed, historical metrics, межпроцессный троттлинг 1 rps/CID, criteria ID | `ads ideas`, `ads historical`, `competitor` | `get_keyword_metrics`, `analyze_competitor` |
 | M6 ✅ | Search Console: OAuth из файла, выборка по дням и страницам, флаг усечения, opportunity mining | `gsc properties/queries/opportunities` | `find_gsc_opportunities` |
-| M7 | Три сценария исследования, budget guard, dry-run. Плоский список, отсортированный по спросу, **без scoring и кластеров** | `research` | `research_keywords` |
-| M8 | Runs: машина состояний по стадиям, отпечаток входа, контрольные точки, resume | `run show/export/resume/rerun` | — |
-| M9 | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
-| M10 | Claude Skill, evals, docs, README | — | — |
+| M7 ✅ | Три сценария исследования, budget guard, dry-run. Плоский список, отсортированный по спросу, **без scoring и кластеров** | `research` | `research_keywords` |
+| M8 ✅ | Runs: машина состояний по стадиям, отпечаток входа, контрольные точки, resume | `run show/export/resume/rerun` | — |
+| M9 ✅ | Scoring, кластеризация, отчёты, niche analyze, provenance-инспекция | `cluster`, `explain-score`, `niche analyze`, `keyword inspect` | те же |
+| M10 ✅ | Claude Skill, evals, docs, README | — | — |
 
 **Почему вех десять, а не восемь.** Дважды приходилось резать: исходный M2
 соединял всю HTTP-инфраструктуру с веерным расширением, а исходный M7 —
