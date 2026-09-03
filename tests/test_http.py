@@ -157,3 +157,67 @@ def test_accept_language_follows_the_requested_market() -> None:
             assert client.headers["Accept-Language"] == "en"
 
     anyio.run(check)
+
+
+def test_a_wait_longer_than_the_ceiling_is_reported_instead_of_slept(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path
+) -> None:
+    """A day-long `Retry-After` is a quota to come back for, not a retry.
+
+    Obeying the header verbatim puts the whole run to sleep straight through
+    the budget's runtime ceiling, with nothing printed and nothing to interrupt
+    but the process. The advertised delay is more useful in the caller's hands
+    than in a sleep it never asked for.
+    """
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(anyio, "sleep", fake_sleep)
+    settings = Settings(
+        data_dir=data_dir,
+        http_max_attempts=3,
+        http_max_retry_after_seconds=60,
+    )
+
+    async def request() -> None:
+        async with httpx.AsyncClient() as client:
+            await request_with_retries(client, "GET", URL, params={}, settings=settings)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": "86400"}))
+        with pytest.raises(RateLimitError) as raised:
+            anyio.run(request)
+
+    assert sleeps == [], "the run must not sleep for a day"
+    assert raised.value.details["retry_after"] == 86400.0
+    assert "86400s" in str(raised.value)
+
+
+def test_a_wait_within_the_ceiling_is_still_honoured(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path
+) -> None:
+    """The ceiling must not turn an ordinary short backoff into a failure."""
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(anyio, "sleep", fake_sleep)
+    settings = Settings(data_dir=data_dir, http_max_attempts=2, http_max_retry_after_seconds=60)
+
+    async def request() -> None:
+        async with httpx.AsyncClient() as client:
+            await request_with_retries(client, "GET", URL, params={}, settings=settings)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(URL).mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": "30"}),
+                httpx.Response(200),
+            ]
+        )
+        anyio.run(request)
+
+    assert sleeps == [30.0]

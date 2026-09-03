@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 10.0
     http_max_attempts: int = 3
     http_backoff_base_seconds: float = 0.5
+    http_max_retry_after_seconds: float = 60.0
     http_user_agent: str = (
         f"google-keyword-ai/{__version__} (+https://github.com/stufently/google-keyword-ai-mcp)"
     )
@@ -87,6 +88,7 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
+        "http_max_retry_after_seconds",
         "http_timeout_seconds",
         "autocomplete_rate_limit_per_second",
         "trends_pacing_seconds",

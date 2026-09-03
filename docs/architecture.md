@@ -51,6 +51,12 @@ and parser version. Per-provider TTLs limit staleness. Async rate limiters pace
 single-process calls; Google Ads also uses a file lock and timestamp for a shared
 interprocess limit.
 
+Retries honour a `Retry-After` header, but only up to
+`http_max_retry_after_seconds` (60 by default). A longer wait is a quota to come
+back for rather than a retry: sleeping it out would run straight through the
+budget's runtime ceiling with nothing on screen, so the request fails instead and
+the advertised delay is reported in the error details.
+
 SQLite uses WAL, a busy timeout, foreign keys and numbered forward migrations.
 Schema v1 added cached payloads; v2 added runs, stages, fingerprints and
 checkpoints; v3 added the rest of the original request to a run — its seed

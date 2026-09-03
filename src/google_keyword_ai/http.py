@@ -89,6 +89,18 @@ async def request_with_retries(
                     f"after {attempt} attempts.",
                     _details(response.url, response.status_code),
                 )
+            asked_to_wait = _retry_after(response)
+            if asked_to_wait is not None and asked_to_wait > settings.http_max_retry_after_seconds:
+                # Obeying the header verbatim means a `Retry-After: 86400` puts
+                # the whole run to sleep for a day, straight through the budget's
+                # runtime ceiling and with nothing on screen. A wait this long is
+                # a quota to come back for later, not a retry, so report it and
+                # let the caller decide -- the number is in the details.
+                raise RateLimitError(
+                    f"Provider asked to wait {asked_to_wait:.0f}s, which is longer than the "
+                    f"{settings.http_max_retry_after_seconds:.0f}s this run will wait.",
+                    _details(response.url, response.status_code) | {"retry_after": asked_to_wait},
+                )
 
         delay = settings.http_backoff_base_seconds * 2 ** (attempt - 1)
         if last_transport_error is None:
