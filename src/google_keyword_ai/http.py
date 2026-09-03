@@ -61,14 +61,10 @@ async def request_with_retries(
     settings: Settings,
     retryable_statuses: Sequence[int] = RETRYABLE_STATUSES,
 ) -> httpx.Response:
-    last_transport_error: httpx.TransportError | None = None
-
     for attempt in range(1, settings.http_max_attempts + 1):
         try:
             response = await client.request(method, url, params=params)
-            last_transport_error = None
         except httpx.TransportError as exc:
-            last_transport_error = exc
             if attempt == settings.http_max_attempts:
                 raise NetworkError(
                     f"Network request failed after {attempt} attempts: {exc}",
@@ -101,13 +97,11 @@ async def request_with_retries(
                     f"{settings.http_max_retry_after_seconds:.0f}s this run will wait.",
                     _details(response.url, response.status_code) | {"retry_after": asked_to_wait},
                 )
+            if asked_to_wait is not None:
+                await anyio.sleep(asked_to_wait)
+                continue
 
         delay = settings.http_backoff_base_seconds * 2 ** (attempt - 1)
-        if last_transport_error is None:
-            retry_after = _retry_after(response)
-            if retry_after is not None:
-                await anyio.sleep(retry_after)
-                continue
         await anyio.sleep(delay + random.uniform(0, delay / 2))
 
     raise AssertionError("retry loop exited unexpectedly")
