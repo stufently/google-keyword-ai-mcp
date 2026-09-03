@@ -3,12 +3,11 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from mcp.server.mcpserver import MCPServer
-from mcp.server.mcpserver.exceptions import ToolError
 
 from google_keyword_ai import __version__
 from google_keyword_ai.clustering import KeywordCluster
 from google_keyword_ai.config import Settings, load_settings
-from google_keyword_ai.envelope import Envelope
+from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.errors import GkaiError
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.pipeline.models import DryRunPlan, ResearchData
@@ -36,19 +35,36 @@ from google_keyword_ai.usecases.suggest import SuggestData, run_suggest
 from google_keyword_ai.usecases.trends import TrendsData, run_trends_compare
 
 
+def _widen[T](envelope: Envelope[T]) -> Envelope[T | None]:
+    """Present a use case's envelope under the tool's wider payload type.
+
+    `Envelope` is invariant in its payload, so an `Envelope[DoctorData]` is not
+    an `Envelope[DoctorData | None]` even though every value of the first is a
+    value of the second. The use cases stay precise about what they produce;
+    only the published tool contract has to admit the refusal envelope the
+    guard can return in their place.
+    """
+    return cast("Envelope[T | None]", envelope)
+
+
 def build_server(settings: Settings | None = None) -> MCPServer:
     active_settings = load_settings() if settings is None else settings
     server = MCPServer(name="google-keyword-ai", version=__version__)
 
     def tool() -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Register a tool that reports a refused request instead of crashing.
+        """Register a tool that answers a refused request instead of crashing.
 
         A `GkaiError` is a failure this code saw coming and described -- an
         unusable date range, a limit that is not positive. Letting it escape
         makes the SDK treat the call as a crash and withhold the text, so the
-        caller is told only "Error executing tool <name>" and cannot tell a
-        rejected argument from a broken server. `ToolError` is the SDK's own
-        name for an anticipated failure, and its message reaches the caller.
+        caller learns only "Error executing tool <name>".
+
+        It comes back as the ordinary envelope rather than a protocol error,
+        because one envelope on both facades is the contract this project is
+        built on: the CLI prints exactly this for the same refusal, and a
+        caller that has to parse two shapes for one outcome has no parity at
+        all. That is why every tool declares a payload that may be `null` --
+        any of them can be refused, and the published schema should say so.
         """
 
         def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
@@ -57,7 +73,12 @@ def build_server(settings: Settings | None = None) -> MCPServer:
                 try:
                     return function(*args, **kwargs)
                 except GkaiError as exc:
-                    raise ToolError(exc.message) from exc
+                    return Envelope(
+                        data=None,
+                        errors=[exc.message],
+                        completeness=Completeness.EMPTY,
+                        completeness_reason=exc.message,
+                    )
 
             return cast(Callable[..., Any], server.tool()(guarded))
 
@@ -67,8 +88,8 @@ def build_server(settings: Settings | None = None) -> MCPServer:
     # thread (anyio.to_thread.run_sync), while an async one would run blocking
     # database and network work directly on the event loop and stall stdio.
     @tool()
-    def doctor() -> Envelope[DoctorData]:
-        return run_doctor(active_settings)
+    def doctor() -> Envelope[DoctorData | None]:
+        return _widen(run_doctor(active_settings))
 
     @tool()
     def suggest_keywords(
@@ -76,13 +97,15 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         language: str | None = None,
         country: str | None = None,
         limit: int | None = None,
-    ) -> Envelope[SuggestData]:
-        return run_suggest(
-            active_settings,
-            query,
-            language=language,
-            country=country,
-            limit=limit,
+    ) -> Envelope[SuggestData | None]:
+        return _widen(
+            run_suggest(
+                active_settings,
+                query,
+                language=language,
+                country=country,
+                limit=limit,
+            )
         )
 
     @tool()
@@ -96,18 +119,20 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         max_runtime_seconds: float | None = None,
         strategies: list[str] | None = None,
         limit: int | None = None,
-    ) -> Envelope[ExpandData]:
-        return run_expand(
-            active_settings,
-            seed,
-            language=language,
-            country=country,
-            depth=depth,
-            max_queries=max_queries,
-            max_results=max_results,
-            max_runtime_seconds=max_runtime_seconds,
-            strategies=strategies,
-            limit=limit,
+    ) -> Envelope[ExpandData | None]:
+        return _widen(
+            run_expand(
+                active_settings,
+                seed,
+                language=language,
+                country=country,
+                depth=depth,
+                max_queries=max_queries,
+                max_results=max_results,
+                max_runtime_seconds=max_runtime_seconds,
+                strategies=strategies,
+                limit=limit,
+            )
         )
 
     @tool()
@@ -116,13 +141,15 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         language: str | None = None,
         country: str | None = None,
         timeframe: str = "today 12-m",
-    ) -> Envelope[TrendsData]:
-        return run_trends_compare(
-            active_settings,
-            keywords,
-            language=language,
-            country=country,
-            timeframe=timeframe,
+    ) -> Envelope[TrendsData | None]:
+        return _widen(
+            run_trends_compare(
+                active_settings,
+                keywords,
+                language=language,
+                country=country,
+                timeframe=timeframe,
+            )
         )
 
     @tool()
@@ -130,12 +157,14 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         keywords: list[str],
         language: str | None = None,
         country: str | None = None,
-    ) -> Envelope[AdsData]:
-        return run_ads_historical(
-            active_settings,
-            keywords,
-            language=language,
-            country=country,
+    ) -> Envelope[AdsData | None]:
+        return _widen(
+            run_ads_historical(
+                active_settings,
+                keywords,
+                language=language,
+                country=country,
+            )
         )
 
     @tool()
@@ -145,14 +174,16 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         language: str | None = None,
         country: str | None = None,
         limit: int | None = None,
-    ) -> Envelope[AdsData]:
-        return run_competitor(
-            active_settings,
-            target,
-            seed_keyword=seed_keyword,
-            language=language,
-            country=country,
-            limit=limit,
+    ) -> Envelope[AdsData | None]:
+        return _widen(
+            run_competitor(
+                active_settings,
+                target,
+                seed_keyword=seed_keyword,
+                language=language,
+                country=country,
+                limit=limit,
+            )
         )
 
     @tool()
@@ -161,13 +192,15 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         days: int = 28,
         country: str | None = None,
         limit: int | None = None,
-    ) -> Envelope[OpportunitiesData]:
-        return run_gsc_opportunities(
-            active_settings,
-            site_url,
-            days=days,
-            country=country,
-            limit=limit,
+    ) -> Envelope[OpportunitiesData | None]:
+        return _widen(
+            run_gsc_opportunities(
+                active_settings,
+                site_url,
+                days=days,
+                country=country,
+                limit=limit,
+            )
         )
 
     @tool()
@@ -178,7 +211,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         country: str | None = None,
         seed_keyword: str | None = None,
         limit: int | None = None,
-    ) -> Envelope[ResearchData]:
+    ) -> Envelope[ResearchData | None]:
         envelope = run_research(
             active_settings,
             target,
@@ -189,7 +222,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             dry_run=False,
             limit=limit,
         )
-        return cast(Envelope[ResearchData], envelope)
+        return _widen(cast(Envelope[ResearchData], envelope))
 
     # Planning is a separate tool on purpose. A single tool returning either
     # shape would need a union return type, and the SDK then nests the payload
@@ -203,7 +236,7 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         language: str | None = None,
         country: str | None = None,
         seed_keyword: str | None = None,
-    ) -> Envelope[DryRunPlan]:
+    ) -> Envelope[DryRunPlan | None]:
         envelope = run_research(
             active_settings,
             target,
@@ -213,27 +246,27 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             seed_keyword=seed_keyword,
             dry_run=True,
         )
-        return cast(Envelope[DryRunPlan], envelope)
+        return _widen(cast(Envelope[DryRunPlan], envelope))
 
     @tool()
     def score_run(run_id: str, limit: int | None = None) -> Envelope[ScoredResearchData | None]:
-        return run_score(active_settings, run_id, limit=limit)
+        return _widen(run_score(active_settings, run_id, limit=limit))
 
     @tool()
     def cluster_run(run_id: str) -> Envelope[list[KeywordCluster] | None]:
-        return run_cluster(active_settings, run_id)
+        return _widen(run_cluster(active_settings, run_id))
 
     @tool()
     def explain_score(run_id: str, keyword: str) -> Envelope[KeywordScore | None]:
-        return run_explain_score(active_settings, run_id, keyword)
+        return _widen(run_explain_score(active_settings, run_id, keyword))
 
     @tool()
     def analyze_niche(run_id: str) -> Envelope[NicheData | None]:
-        return run_niche_analyze(active_settings, run_id)
+        return _widen(run_niche_analyze(active_settings, run_id))
 
     @tool()
     def inspect_keyword(run_id: str, keyword: str) -> Envelope[KeywordProvenance | None]:
-        return run_keyword_inspect(active_settings, run_id, keyword)
+        return _widen(run_keyword_inspect(active_settings, run_id, keyword))
 
     return server
 

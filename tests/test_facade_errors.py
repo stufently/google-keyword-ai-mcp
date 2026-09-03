@@ -87,19 +87,62 @@ def test_a_missing_run_is_an_answer_over_mcp_not_a_tool_failure(
     assert result.structured_content["data"] is None
 
 
-def test_a_refused_argument_reaches_the_mcp_caller_with_its_reason(
+def test_a_refused_argument_is_the_same_envelope_on_both_facades(
     thread_offload: None, tmp_path: Path
 ) -> None:
-    """`ToolError` is the SDK's word for a failure the tool saw coming.
+    """One envelope on both facades is the contract, refusals included.
 
-    Any other exception is treated as a crash and the message is withheld, so
-    letting `GkaiError` escape told the caller only which tool failed.
+    A protocol error would also carry the reason, but it makes the caller parse
+    two shapes for one outcome: an envelope when the run is missing, a tool
+    error when the limit is. The CLI prints exactly one shape for both, and
+    this pins that MCP does too -- byte for byte, not merely in spirit.
     """
     result = call_tool(tmp_path, "score_run", {"run_id": "run_missing", "limit": 0})
 
-    assert result.is_error is True
-    rendered = " ".join(getattr(item, "text", "") for item in result.content)
-    assert "Score limit must be positive." in rendered
+    assert result.is_error is not True
+    assert result.structured_content is not None
+    assert result.structured_content["completeness_reason"] == "Score limit must be positive."
+
+    environment = os.environ.copy()
+    environment["GKAI_DATA_DIR"] = str(tmp_path)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "google_keyword_ai.cli.main",
+            "score",
+            "run_missing",
+            "--limit",
+            "0",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert completed.returncode == 1, completed.stderr
+    assert result.structured_content == json.loads(completed.stdout)
+
+
+def test_every_tool_publishes_a_payload_that_admits_the_refusal_envelope(
+    thread_offload: None, tmp_path: Path
+) -> None:
+    """A tool that cannot express `data: null` cannot report its own refusal.
+
+    The SDK validates a return value against the declared type, so the guard's
+    envelope would be rejected as a crash by any tool whose payload is not
+    nullable -- which is how the analysis tools lost their empty answer in the
+    first place. Checking every tool catches the one added later.
+    """
+    for name, tool in list_tools(tmp_path).items():
+        schema = tool.output_schema
+        assert schema is not None, name
+        payload = schema["properties"]["data"]
+        assert "anyOf" in payload, f"tool {name} declares a payload that cannot be null"
+        assert {"type": "null"} in payload["anyOf"], (
+            f"tool {name} cannot return the envelope its own guard produces"
+        )
 
 
 @pytest.mark.parametrize(
