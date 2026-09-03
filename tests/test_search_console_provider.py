@@ -161,6 +161,34 @@ def test_keys_follow_requested_dimensions_in_order(tmp_path: Path) -> None:
     }
 
 
+def test_a_row_that_cannot_be_read_is_an_api_error(tmp_path: Path) -> None:
+    """A changed response shape is a provider fault, not a crash in the tool.
+
+    The casts around this parse are annotations, not conversions: a reply with
+    a string where a number belongs travels untouched into pydantic and comes
+    back a `ValidationError`, which is a `ValueError` and no `GkaiError`. Both
+    facades watch for `GkaiError`, so the caller would get a traceback or an
+    opaque tool failure in place of a stated reason.
+    """
+    broken = _row()
+    broken["clicks"] = "many"
+    service = FakeService([{"rows": [broken]}])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        with pytest.raises(ApiError) as raised:
+            _query(
+                provider,
+                "sc-domain:example.com",
+                start_date=date(2026, 8, 1),
+                end_date=date(2026, 8, 1),
+                dimensions=["query", "page"],
+            )
+    finally:
+        engine.dispose()
+
+    assert "Search Console response could not be read" in raised.value.message
+
+
 def test_daily_range_is_split_into_one_request_per_day(tmp_path: Path) -> None:
     service = FakeService([{"rows": []}, {"rows": []}, {"rows": []}])
     provider, engine = _provider(_settings(tmp_path), service)
@@ -482,3 +510,55 @@ def test_properties_and_country_filter_use_official_shapes(tmp_path: Path) -> No
     body = service.calls[0][1]
     assert body["type"] == "image"
     assert body["dimensionFilterGroups"][0]["filters"][0]["expression"] == "usa"
+
+
+def test_the_row_cap_is_part_of_the_cache_key(tmp_path: Path) -> None:
+    """A short answer produced under a small cap must not be served to a large one.
+
+    The cap bounds the request itself, so it decides how many rows come back
+    and whether the answer is marked truncated -- it is an input to the result,
+    not a detail of how it was fetched. Left out of the key, raising the cap
+    changed nothing: the run kept being handed the truncated answer it was
+    raised to replace, and the extra rows were never read.
+    """
+    first = _row()
+    first["keys"] = ["one"]
+    second = _row()
+    second["keys"] = ["two"]
+
+    small = _settings(tmp_path, search_console_daily_row_cap=1)
+    service = FakeService([{"rows": [first]}])
+    provider, engine = _provider(small, service)
+    try:
+        capped = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 1),
+            dimensions=["query"],
+            row_limit=10,
+        )
+    finally:
+        engine.dispose()
+
+    assert capped.truncated is True
+    assert len(capped.rows) == 1
+
+    large = _settings(tmp_path, search_console_daily_row_cap=50)
+    reopened = FakeService([{"rows": [first, second]}, {"rows": []}])
+    provider, engine = _provider(large, reopened)
+    try:
+        raised = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 1),
+            dimensions=["query"],
+            row_limit=10,
+        )
+    finally:
+        engine.dispose()
+
+    assert reopened.calls, "the raised cap reused the answer capped at one row"
+    assert raised.truncated is False
+    assert [row.keys["query"] for row in raised.rows] == ["one", "two"]

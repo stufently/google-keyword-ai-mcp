@@ -64,6 +64,12 @@ class GoogleTrendsProvider(Provider):
             "geo": geo,
             "timeframe": timeframe,
             "hl": hl,
+            # Trends buckets the timeline against this offset before returning
+            # it, so two runs under different offsets ask the same question and
+            # get points cut on different day boundaries. Left out of the key,
+            # the first answer is served to the second, which then reads a
+            # timeline aligned to a zone it never asked about.
+            "tz": str(self._settings.trends_timezone_minutes),
         }
         cache_key = build_cache_key(
             self.info.name,

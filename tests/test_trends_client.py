@@ -11,6 +11,7 @@ import respx
 from google_keyword_ai.cache import SqliteCache
 from google_keyword_ai.config import Settings
 from google_keyword_ai.errors import ApiError, ProviderUnavailableError
+from google_keyword_ai.providers.trends.models import TrendsResult
 from google_keyword_ai.providers.trends.provider import GoogleTrendsProvider
 from google_keyword_ai.providers.trends.unofficial import (
     CONSUMED_WIDGETS,
@@ -51,6 +52,7 @@ def add_widget_routes(
     explore_payload: str,
     *,
     failing_widget: str | None = None,
+    timezone_minutes: int = -180,
 ) -> Iterator[respx.Route]:
     responses = {
         "TIMESERIES": fixture("multiline_popular.json"),
@@ -70,7 +72,7 @@ def add_widget_routes(
             f"{WIDGETDATA_URL}/{WIDGET_PATHS[widget_id]}",
             params={
                 "hl": "ru",
-                "tz": "-180",
+                "tz": str(timezone_minutes),
                 "req": json.dumps(request, ensure_ascii=False, separators=(",", ":")),
                 "token": token,
             },
@@ -216,6 +218,57 @@ async def test_provider_second_request_comes_from_cache(tmp_path: Path) -> None:
         engine.dispose()
 
     assert second == first
+
+
+@pytest.mark.anyio
+async def test_the_timezone_offset_is_part_of_the_cache_key(tmp_path: Path) -> None:
+    """A timeline cut on one day boundary must not answer for another.
+
+    The offset travels to Trends as `tz` and decides where each bucket of the
+    timeline begins. Outside the key, the first run's answer is served to a run
+    under a different offset, which then reads points aligned to a zone it
+    never asked about -- and nothing in the reply says so.
+    """
+    explore_payload = fixture("explore_popular.json")
+
+    async def fetch_under(offset: int) -> tuple[TrendsResult, int]:
+        settings = Settings(
+            data_dir=tmp_path,
+            http_max_attempts=1,
+            trends_pacing_seconds=0.001,
+            trends_timezone_minutes=offset,
+        )
+        engine = open_database(settings)
+        try:
+            async with httpx.AsyncClient() as http_client:
+                provider = GoogleTrendsProvider(
+                    settings=settings,
+                    client=http_client,
+                    cache=SqliteCache(engine, settings),
+                    rate_limiter=NoopRateLimiter(),
+                )
+                with respx.mock() as router:
+                    router.get(WARMUP_URL).mock(return_value=httpx.Response(405))
+                    explore = router.get(EXPLORE_URL).mock(
+                        return_value=httpx.Response(200, text=explore_payload)
+                    )
+                    list(add_widget_routes(router, explore_payload, timezone_minutes=offset))
+                    result = await provider.fetch(
+                        ["недвижимость"], geo="RU", timeframe="today 12-m", hl="ru"
+                    )
+                    return result, explore.call_count
+        finally:
+            engine.dispose()
+
+    first, first_calls = await fetch_under(-180)
+    second, second_calls = await fetch_under(0)
+
+    assert first_calls == 1
+    assert second_calls == 1, "the second offset was answered from the first offset's cache"
+    # Both runs read the same fixture, so a second run that really went out
+    # returns the same timeline: the call count is what separates a fresh
+    # answer from the first offset's stored one.
+    assert second.timeline == first.timeline
 
 
 @pytest.mark.anyio

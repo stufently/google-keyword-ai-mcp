@@ -27,6 +27,7 @@ from google_keyword_ai.providers.search_console import (
 )
 from google_keyword_ai.ratelimit import InterProcessRateLimiter
 from google_keyword_ai.storage.engine import open_database
+from google_keyword_ai.usecases.limits import require_positive_limit
 
 _GSC_ERRORS = (
     ProviderUnavailableError,
@@ -218,6 +219,7 @@ def run_gsc_queries(
     search_type: str = "web",
     limit: int | None = None,
 ) -> Envelope[QueriesData]:
+    require_positive_limit(limit, "Query")
     provider = _provider_info()
     requested_dimensions = ["query"] if dimensions is None else list(dimensions)
     start_text = "" if start_date is None else str(start_date)
@@ -343,6 +345,7 @@ def run_gsc_opportunities(
     country: str | None = None,
     limit: int | None = None,
 ) -> Envelope[OpportunitiesData]:
+    require_positive_limit(limit, "Opportunity")
     provider = _provider_info()
     try:
         start, end = _date_window(days=days, start_date=None, end_date=None)

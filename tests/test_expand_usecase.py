@@ -6,7 +6,7 @@ import pytest
 from google_keyword_ai.cache import SqliteCache
 from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness
-from google_keyword_ai.errors import NetworkError
+from google_keyword_ai.errors import InvalidConfigurationError, NetworkError
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.market import Market
 from google_keyword_ai.normalize import KeywordCandidate
@@ -251,3 +251,85 @@ def test_an_empty_result_without_failures_still_says_no_keywords(
     assert envelope.completeness is Completeness.EMPTY
     assert envelope.completeness_reason == "no keywords"
     assert envelope.warnings == []
+
+
+@pytest.mark.parametrize("budget_stop", ["max_queries", "max_results", "max_runtime"])
+def test_an_empty_result_names_the_budget_that_stopped_it(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch, budget_stop: str
+) -> None:
+    """A budget that cut the crawl short is the same hidden cause as a failure.
+
+    The crawl that never got going reported the flat "no keywords", which reads
+    as a measured verdict about the niche. The caller then raises nothing,
+    because nothing told them the budget was what ended the search.
+    """
+    monkeypatch.setattr(
+        expand_usecase,
+        "_fetch_expansion",
+        _stub_result(
+            [],
+            ExpansionStats(queries_executed=2, depth_reached=0, stopped_by=budget_stop),
+        ),
+    )
+
+    envelope = expand_usecase.run_expand(Settings(data_dir=data_dir), "seed")
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == f"stopped by {budget_stop}"
+
+
+def test_reaching_the_requested_depth_is_not_a_reason_for_an_empty_result(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only a budget stop qualifies, exactly as in the partial branch.
+
+    `max_depth` means the crawl finished the scope it was given. Letting it
+    into the empty reason would turn every barren seed into "stopped by
+    max_depth" and invite the caller to raise a depth that was never the limit.
+    """
+    monkeypatch.setattr(
+        expand_usecase,
+        "_fetch_expansion",
+        _stub_result(
+            [],
+            ExpansionStats(queries_executed=9, depth_reached=0, stopped_by="max_depth"),
+        ),
+    )
+
+    envelope = expand_usecase.run_expand(Settings(data_dir=data_dir), "seed")
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == "no keywords"
+
+
+def test_a_non_positive_limit_is_refused_before_any_request(
+    data_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A limit of zero selects nothing, so it is an impossible request.
+
+    Left unchecked it did not fail -- it succeeded emptily: the slice emptied
+    `data.keywords` while the completeness check looked at the unsliced list,
+    so the answer came back `complete` with nothing in it.
+    """
+
+    def unreachable(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the refusal must land before any provider work")
+
+    monkeypatch.setattr(expand_usecase, "_fetch_expansion", unreachable)
+
+    with pytest.raises(InvalidConfigurationError) as caught:
+        expand_usecase.run_expand(Settings(data_dir=data_dir), "seed", limit=0)
+
+    assert caught.value.message == "Expansion limit must be positive."
+
+
+def test_an_unknown_strategy_is_refused_by_name(data_dir: Path) -> None:
+    """The refusal has to be a `GkaiError`, or the facades cannot report it.
+
+    A bare `ValueError` from the enum is not something either facade
+    recognises, so it surfaced as a crash with the reason stripped.
+    """
+    with pytest.raises(InvalidConfigurationError) as caught:
+        expand_usecase.run_expand(Settings(data_dir=data_dir), "seed", strategies=["nonsense"])
+
+    assert "suffix_alphabet" in caught.value.message

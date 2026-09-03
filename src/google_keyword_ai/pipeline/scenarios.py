@@ -4,7 +4,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from typing import Protocol, cast
-from urllib.parse import urlsplit
 
 from google_keyword_ai.config import Settings
 from google_keyword_ai.errors import GkaiError
@@ -25,6 +24,7 @@ from google_keyword_ai.providers.expander import ExpansionStats
 from google_keyword_ai.providers.google_ads import AdsSeed, KeywordIdea
 from google_keyword_ai.providers.search_console import SearchAnalyticsPage, SiteProperty
 from google_keyword_ai.providers.trends.models import TrendsResult
+from google_keyword_ai.targets import is_bare_domain
 
 # The three standing prohibitions, in the language the rest of the output uses.
 # Expansion budget names, translated to the research budget option that caused
@@ -447,11 +447,6 @@ class NewNicheResearch:
         )
 
 
-def _is_bare_domain(target: str) -> bool:
-    parsed = urlsplit(target if "://" in target else f"//{target}")
-    return bool(parsed.hostname) and parsed.path in {"", "/"} and not parsed.query
-
-
 class CompetitorResearch:
     def __init__(self, target: str, seed_keyword: str | None = None) -> None:
         self.target = target
@@ -461,7 +456,7 @@ class CompetitorResearch:
         used: set[str] = set()
         keywords: list[ResearchKeyword] = []
         expansion: ExpansionStats | None = None
-        site_seed = self.seed_keyword is None and _is_bare_domain(self.target)
+        site_seed = self.seed_keyword is None and is_bare_domain(self.target)
         if context.google_ads is not None and context.budget_guard.can_spend("ads"):
             if self.seed_keyword is not None:
                 seed = AdsSeed(keywords=[self.seed_keyword], url=self.target)

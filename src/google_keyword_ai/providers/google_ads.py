@@ -161,6 +161,18 @@ def _parse_metrics(metrics: object) -> KeywordMetrics:
 
 
 def _parse_ideas(response: object, *, historical: bool) -> list[KeywordIdea]:
+    try:
+        return _parse_ideas_strictly(response, historical=historical)
+    except (ValueError, TypeError, AttributeError) as exc:
+        # Only Google's own API errors are translated around the call; the read
+        # of the reply is not covered. A field that stops being a number, or a
+        # message that stops carrying one, raises here as a plain `ValueError`
+        # or `AttributeError` -- no `GkaiError`, so the facades report a crash
+        # instead of a provider whose answer could not be read.
+        raise ApiError(f"Google Ads response could not be read: {exc}") from exc
+
+
+def _parse_ideas_strictly(response: object, *, historical: bool) -> list[KeywordIdea]:
     rows = getattr(response, "results", ()) if historical else response
     metrics_field = "keyword_metrics" if historical else "keyword_idea_metrics"
     return [
@@ -244,7 +256,11 @@ class GoogleAdsProvider(Provider):
         return build_cache_key(
             self.info.name,
             endpoint,
-            params,
+            # The version selects which API answered, and Google changes what a
+            # version returns; `parser_version` covers our side of the parse but
+            # says nothing about theirs. Both endpoints key through here, so
+            # neither can serve one version's answer to a run on another.
+            params | {"api_version": self._settings.google_ads_api_version},
             account_scope=customer_id,
             parser_version=PARSER_VERSION,
         )

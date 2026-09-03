@@ -219,6 +219,12 @@ class SearchConsoleProvider(Provider):
             "search_type": search_type,
             "data_state": data_state,
             "row_limit": str(row_limit),
+            # The cap bounds the request itself, so it decides how many rows
+            # come back and whether the answer is marked truncated. Leaving it
+            # out of the key lets a run under a small cap serve its short,
+            # truncated answer to a later run under a large one, which would
+            # then never read the rows it was raised to fetch.
+            "daily_row_cap": str(self._settings.search_console_daily_row_cap),
             "authorization_scope": READONLY_SCOPE,
             "dimension_filters": json.dumps(
                 dimension_filters,
@@ -260,6 +266,21 @@ class SearchConsoleProvider(Provider):
 
     @staticmethod
     def _parse_rows(
+        raw_rows: Sequence[dict[str, object]], dimensions: Sequence[str]
+    ) -> list[SearchAnalyticsRow]:
+        try:
+            return SearchConsoleProvider._parse_rows_strictly(raw_rows, dimensions)
+        except (ValueError, TypeError) as exc:
+            # The casts below are annotations, not conversions: a reply with a
+            # string where a number belongs reaches pydantic unchanged and comes
+            # back as a `ValidationError`, which is a `ValueError` and no
+            # `GkaiError`. Neither facade recognises that as an answer, so a
+            # changed response shape reads as a crash in the tool rather than as
+            # a provider that cannot be read.
+            raise ApiError(f"Search Console response could not be read: {exc}") from exc
+
+    @staticmethod
+    def _parse_rows_strictly(
         raw_rows: Sequence[dict[str, object]], dimensions: Sequence[str]
     ) -> list[SearchAnalyticsRow]:
         parsed: list[SearchAnalyticsRow] = []

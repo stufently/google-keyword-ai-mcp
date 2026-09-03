@@ -29,7 +29,11 @@ from google_keyword_ai.pipeline.scenarios import (
 )
 from google_keyword_ai.providers.search_console import SiteProperty
 from google_keyword_ai.usecases import research as research_module
-from google_keyword_ai.usecases.research import _select_scenario, run_research
+from google_keyword_ai.usecases.research import (
+    _envelope_for_research,
+    _select_scenario,
+    run_research,
+)
 
 
 class PropertyOnlyGsc:
@@ -182,3 +186,87 @@ def test_caveats_include_all_three_prohibitions_when_sources_participate(
     assert TRENDS_CAVEAT in quality.caveats
     assert ADS_CAVEAT in quality.caveats
     assert SITE_SEED_CAVEAT in quality.caveats
+
+
+@pytest.mark.parametrize("budget_stop", ["max_runtime_seconds", "max_ads_calls"])
+def test_an_empty_research_result_names_the_budget_that_stopped_it(
+    settings: Settings, budget_stop: str
+) -> None:
+    """A run cut short before it gathered anything must not read as a verdict.
+
+    "no research data" is a statement about the niche. A budget that ended the
+    run before the first stage finished is a statement about the budget, and
+    the caller who cannot tell them apart abandons a niche they never measured.
+    """
+    data = _data(settings, with_keyword=False)
+    data.stats.stopped_by = budget_stop
+
+    envelope = _envelope_for_research(data, [], [])
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == f"stopped by {budget_stop}"
+
+
+def test_an_empty_research_result_with_nothing_to_blame_still_says_so(
+    settings: Settings,
+) -> None:
+    """Without a stop, a warning or an error, the niche really was empty."""
+    envelope = _envelope_for_research(_data(settings, with_keyword=False), [], [])
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == "no research data"
+
+
+def test_a_reported_problem_outranks_the_budget_stop_as_the_reason(
+    settings: Settings,
+) -> None:
+    """An error explains an empty answer better than the stop that followed it.
+
+    A provider that refused is why there is nothing; the budget stop is only
+    what happened next. The order matches the partial branch, so one rule
+    covers both.
+    """
+    data = _data(settings, with_keyword=False)
+    data.stats.stopped_by = "max_runtime_seconds"
+
+    envelope = _envelope_for_research(data, ["a warning"], ["provider refused"])
+
+    assert envelope.completeness_reason == "provider refused"
+
+
+def test_the_budget_stop_outranks_a_warning_as_the_reason_for_nothing(
+    settings: Settings,
+) -> None:
+    """A skipped optional source explains a thin answer, not an absent one.
+
+    Research warnings are mostly "this source was skipped": true, reported in
+    `warnings`, and no answer to why there are no keywords. The stop is. Read
+    the other way round, a run that never measured the niche reports the
+    absence of Ads as its verdict on it.
+    """
+    data = _data(settings, with_keyword=False)
+    data.stats.stopped_by = "max_runtime_seconds"
+
+    envelope = _envelope_for_research(data, ["Google Ads was skipped"], [])
+
+    assert envelope.completeness_reason == "stopped by max_runtime_seconds"
+
+
+def test_the_first_warning_is_the_reason_in_both_branches(settings: Settings) -> None:
+    """One field, one rule for choosing it -- whether or not anything arrived.
+
+    Warnings accumulate as the run proceeds, so the last one stands furthest
+    from the cause. The partial branch already reports the first; the empty
+    branch reported the last, which meant the same two warnings explained the
+    same run differently depending on whether it returned a keyword.
+    """
+    empty = _envelope_for_research(
+        _data(settings, with_keyword=False), ["first cause", "later effect"], []
+    )
+    partial = _envelope_for_research(
+        _data(settings, with_keyword=True), ["first cause", "later effect"], []
+    )
+
+    assert empty.completeness is Completeness.EMPTY
+    assert partial.completeness is Completeness.PARTIAL
+    assert empty.completeness_reason == partial.completeness_reason == "first cause"

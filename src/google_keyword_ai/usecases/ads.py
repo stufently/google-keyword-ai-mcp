@@ -1,7 +1,6 @@
 import hashlib
 from collections.abc import Sequence
 from functools import partial
-from urllib.parse import urlsplit
 
 import anyio
 from pydantic import BaseModel
@@ -21,6 +20,8 @@ from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.google_ads import AdsSeed, GoogleAdsProvider, KeywordIdea
 from google_keyword_ai.ratelimit import InterProcessRateLimiter
 from google_keyword_ai.storage.engine import open_database
+from google_keyword_ai.targets import is_bare_domain
+from google_keyword_ai.usecases.limits import require_positive_limit
 
 
 class AdsData(BaseModel):
@@ -97,6 +98,7 @@ def run_ads_ideas(
     include_adult: bool = False,
     limit: int | None = None,
 ) -> Envelope[AdsData]:
+    require_positive_limit(limit, "Keyword idea")
     market = Market.parse(
         settings.default_language if language is None else language,
         settings.default_country if country is None else country,
@@ -202,12 +204,6 @@ def run_ads_historical(
     )
 
 
-def _is_bare_domain(target: str) -> bool:
-    candidate = target.strip()
-    parsed = urlsplit(candidate if "://" in candidate else f"//{candidate}")
-    return bool(parsed.hostname) and parsed.path in {"", "/"} and not parsed.query
-
-
 def run_competitor(
     settings: Settings,
     target: str,
@@ -226,7 +222,7 @@ def run_competitor(
             country=country,
             limit=limit,
         )
-    if _is_bare_domain(target):
+    if is_bare_domain(target):
         return run_ads_ideas(
             settings,
             site=target,

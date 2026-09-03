@@ -28,6 +28,18 @@ MCP tools must have one concrete result shape. Planning and execution are separa
 `plan_research` and `research_keywords` tools because a union return type makes the
 SDK wrap data under an extra `result` key and breaks CLI/MCP parity.
 
+A refused request travels in that same envelope: `completeness: empty` with the
+reason, printed by the CLI on exit 1 and returned by MCP as ordinary structured
+output. Refusals are therefore raised as project errors before any provider work
+— a non-positive `limit` selects nothing and so is impossible rather than small,
+and an unknown expansion strategy is named against the list of known ones,
+because MCP publishes that argument as free strings while the CLI parses an enum.
+
+An empty answer always names what produced it. A budget that stopped a crawl
+before it collected anything, or a batch of skipped requests, is reported in
+place of the flat "no keywords" — the two read very differently to a caller
+deciding whether the niche is worth another look.
+
 ## Providers
 
 All providers expose `Provider.info` (`name`, official status, stability) and
@@ -47,7 +59,13 @@ Failures cross the boundary as project errors and become honest `partial` or
 ## Cache, throttling and storage
 
 SQLite cache keys include provider, endpoint, canonical parameters, account scope
-and parser version. Per-provider TTLs limit staleness. Async rate limiters pace
+and parser version. A setting counts as a parameter when it shapes the answer
+rather than the fetch: the Search Console row cap bounds the request itself, so
+it belongs in the key, or raising it would keep serving the short answer it was
+raised to replace. The Trends timezone offset and the Google Ads API version are
+in for the same reason -- the first decides where each bucket of the timeline
+begins, the second decides which API answered, and `parser_version` covers only
+our side of the parse. Per-provider TTLs limit staleness. Async rate limiters pace
 single-process calls; Google Ads also uses a file lock and timestamp for a shared
 interprocess limit.
 

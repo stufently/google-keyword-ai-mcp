@@ -9,6 +9,7 @@ from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.errors import (
     ApiError,
+    InvalidConfigurationError,
     NetworkError,
     ProviderUnavailableError,
     RateLimitError,
@@ -22,6 +23,7 @@ from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats, KeywordExpander
 from google_keyword_ai.ratelimit import AsyncRateLimiter
 from google_keyword_ai.storage.engine import open_database
+from google_keyword_ai.usecases.limits import require_positive_limit
 
 # Running out of budget means the answer is cut short. Reaching the depth the
 # caller asked for does not: that is the requested scope, finished. Treating it
@@ -63,6 +65,18 @@ async def _fetch_expansion(
         return provider.info, keywords, stats
 
 
+def _parse_strategies(
+    strategies: Sequence[str | ExpansionStrategy] | None,
+) -> list[ExpansionStrategy]:
+    """Turn caller-supplied strategy names into enum members."""
+    if strategies is None:
+        return list(ExpansionStrategy)
+    return [
+        strategy if isinstance(strategy, ExpansionStrategy) else ExpansionStrategy(strategy)
+        for strategy in strategies
+    ]
+
+
 def run_expand(
     settings: Settings,
     seed: str,
@@ -76,6 +90,7 @@ def run_expand(
     strategies: Sequence[str | ExpansionStrategy] | None = None,
     limit: int | None = None,
 ) -> Envelope[ExpandData]:
+    require_positive_limit(limit, "Expansion")
     market = Market.parse(
         settings.default_language if language is None else language,
         settings.default_country if country is None else country,
@@ -86,14 +101,17 @@ def run_expand(
         max_results=2000 if max_results is None else max_results,
         max_runtime_seconds=120.0 if max_runtime_seconds is None else max_runtime_seconds,
     )
-    selected_strategies = (
-        list(ExpansionStrategy)
-        if strategies is None
-        else [
-            strategy if isinstance(strategy, ExpansionStrategy) else ExpansionStrategy(strategy)
-            for strategy in strategies
-        ]
-    )
+    # The CLI hands over an already-parsed enum, but MCP publishes this as a
+    # list of free strings, so an unknown name arrives here as a bare
+    # ValueError -- which the facades do not recognise as a refusal and report
+    # as a crash with the reason stripped. Naming what is valid costs nothing.
+    try:
+        selected_strategies = _parse_strategies(strategies)
+    except ValueError as exc:
+        known = ", ".join(strategy.value for strategy in ExpansionStrategy)
+        raise InvalidConfigurationError(
+            f"Unknown expansion strategy. Known strategies are: {known}."
+        ) from exc
     provider_info = ProviderInfo(name="autocomplete", official=False, stability="unofficial")
     empty_stats = ExpansionStats(queries_executed=0, depth_reached=0)
     engine = open_database(settings)
@@ -153,11 +171,21 @@ def run_expand(
         ]
     )
     if not keywords:
+        # A budget that stopped the crawl before it collected anything is the
+        # same kind of hidden cause as a failed request: "no keywords" reads as
+        # an empty niche either way. The order of causes matches the partial
+        # branch below, so one rule explains both.
+        if stats.stopped_by in BUDGET_STOPS:
+            reason = f"stopped by {stats.stopped_by}"
+        elif failures:
+            reason = failures[0]
+        else:
+            reason = "no keywords"
         return Envelope(
             data=data,
             warnings=failures,
             completeness=Completeness.EMPTY,
-            completeness_reason=failures[0] if failures else "no keywords",
+            completeness_reason=reason,
         )
     if stats.stopped_by in BUDGET_STOPS:
         return Envelope(

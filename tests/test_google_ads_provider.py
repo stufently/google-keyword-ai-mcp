@@ -226,6 +226,58 @@ def test_cache_is_scoped_by_customer_and_reused(tmp_path: Path) -> None:
     assert len(service.calls) == 2
 
 
+def test_the_api_version_is_part_of_the_cache_key(tmp_path: Path) -> None:
+    """A stored answer belongs to the API version that produced it.
+
+    The version picks which API the client talks to, and Google changes what a
+    version returns. `parser_version` covers our reading of the reply and says
+    nothing about theirs, so without the version in the key a run pinned to the
+    new API is quietly served the old one's answer.
+    """
+    data_dir = tmp_path / "shared"
+    service = FakeService()
+    settings = _credentials(data_dir)
+    older, older_engine = _provider(settings, service)
+    newer, newer_engine = _provider(
+        settings.model_copy(update={"google_ads_api_version": "v26"}), service
+    )
+    seed = AdsSeed(keywords=["one"])
+    market = Market.parse("en", "US")
+    try:
+        anyio.run(older.keyword_ideas, seed, market)
+        anyio.run(newer.keyword_ideas, seed, market)
+    finally:
+        older_engine.dispose()
+        newer_engine.dispose()
+
+    assert len(service.calls) == 2, "the second version was answered from the first version's cache"
+
+
+def test_a_reply_that_cannot_be_read_is_an_api_error(tmp_path: Path) -> None:
+    """A changed response shape is a provider fault, not a crash in the tool.
+
+    Only Google's own API errors are translated around the call; reading the
+    reply is not covered. A field that stops being a number raises a plain
+    `ValueError` here, which is no `GkaiError` -- and both facades watch for
+    `GkaiError`, so the caller would get a traceback or an opaque tool failure
+    instead of a stated reason.
+    """
+    service = FakeService()
+    broken = _metrics()
+    broken.avg_monthly_searches = "many"
+    service.generate_keyword_ideas = (  # type: ignore[method-assign]
+        lambda *, request: [SimpleNamespace(text="keyword", keyword_idea_metrics=broken)]
+    )
+    provider, engine = _provider(_credentials(tmp_path), service)
+    try:
+        with pytest.raises(ApiError) as raised:
+            anyio.run(provider.keyword_ideas, AdsSeed(keywords=["one"]), Market.parse("en", "US"))
+    finally:
+        engine.dispose()
+
+    assert "Google Ads response could not be read" in raised.value.message
+
+
 @pytest.mark.parametrize(
     ("library_error", "expected_error"),
     [

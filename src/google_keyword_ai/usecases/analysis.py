@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from google_keyword_ai.clustering import KeywordCluster, cluster_keywords, tokenize
 from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness, Envelope
-from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.normalize import normalize_keyword
 from google_keyword_ai.pipeline.models import ResearchData, ResearchKeyword
 from google_keyword_ai.pipeline.runs import RunStore
@@ -18,6 +17,7 @@ from google_keyword_ai.scoring import (
     trend_series_keyword,
 )
 from google_keyword_ai.storage.engine import open_database
+from google_keyword_ai.usecases.limits import require_positive_limit
 
 
 class ScoredResearchData(BaseModel):
@@ -113,8 +113,7 @@ def run_score(
     *,
     limit: int | None = None,
 ) -> Envelope[ScoredResearchData | None]:
-    if limit is not None and limit <= 0:
-        raise InvalidConfigurationError("Score limit must be positive.")
+    require_positive_limit(limit, "Score")
     research, reason = _load_research(settings, run_id)
     if research is None:
         return _empty(reason or "Saved research data is unavailable.", run_id=run_id)

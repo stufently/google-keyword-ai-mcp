@@ -18,6 +18,7 @@ from google_keyword_ai.providers.autocomplete import AutocompleteProvider, Sugge
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.ratelimit import AsyncRateLimiter
 from google_keyword_ai.storage.engine import open_database
+from google_keyword_ai.usecases.limits import require_positive_limit
 
 
 class SuggestData(BaseModel):
@@ -54,6 +55,7 @@ def run_suggest(
     country: str | None = None,
     limit: int | None = None,
 ) -> Envelope[SuggestData]:
+    require_positive_limit(limit, "Suggestion")
     market = Market.parse(
         settings.default_language if language is None else language,
         settings.default_country if country is None else country,

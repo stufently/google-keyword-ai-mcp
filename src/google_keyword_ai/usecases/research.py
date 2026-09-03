@@ -39,6 +39,7 @@ from google_keyword_ai.ratelimit import AsyncRateLimiter
 from google_keyword_ai.storage.engine import open_database
 from google_keyword_ai.usecases.ads import _build_provider as build_ads_provider
 from google_keyword_ai.usecases.gsc import _build_provider as build_gsc_provider
+from google_keyword_ai.usecases.limits import require_positive_limit
 
 _SCENARIOS = frozenset({"auto", "niche", "competitor", "site"})
 _DOMAIN = re.compile(
@@ -213,7 +214,23 @@ def _envelope_for_research(
 ) -> Envelope[ResearchData]:
     has_data = bool(data.keywords or data.trends is not None or data.opportunities)
     if not has_data:
-        reason = errors[0] if errors else warnings[-1] if warnings else "no research data"
+        # A run the budget cut short before it gathered anything would otherwise
+        # report the flat "no research data", which reads as a measured verdict
+        # about the niche rather than an interrupted attempt. The stop outranks
+        # a warning here, unlike in the partial branch: research warnings are
+        # mostly "this optional source was skipped", which explains a thin
+        # answer but not an absent one -- the stop is why there is nothing.
+        # The warning that gets picked is the first, as everywhere else: they
+        # accumulate as the run proceeds, so the last one is the consequence
+        # furthest from the cause.
+        if errors:
+            reason = errors[0]
+        elif data.stats.stopped_by is not None:
+            reason = f"stopped by {data.stats.stopped_by}"
+        elif warnings:
+            reason = warnings[0]
+        else:
+            reason = "no research data"
         return Envelope(
             data=data,
             warnings=warnings,
@@ -363,8 +380,7 @@ def run_research(
 ) -> Envelope[ResearchData] | Envelope[DryRunPlan]:
     if scenario not in _SCENARIOS:
         raise InvalidConfigurationError(f"Unknown research scenario: {scenario}.")
-    if limit is not None and limit <= 0:
-        raise InvalidConfigurationError("Research limit must be positive.")
+    require_positive_limit(limit, "Research")
     market = Market.parse(
         settings.default_language if language is None else language,
         settings.default_country if country is None else country,

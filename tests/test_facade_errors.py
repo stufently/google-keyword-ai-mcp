@@ -151,6 +151,28 @@ def test_every_tool_publishes_a_payload_that_admits_the_refusal_envelope(
         (["score", "run_missing", "--limit", "0"], "Score limit must be positive."),
         (["research", "alpha", "--limit", "0"], "Research limit must be positive."),
         (["research", "alpha", "--scenario", "nonsense"], "Unknown research scenario: nonsense."),
+        (["expand", "alpha", "--limit", "0"], "Expansion limit must be positive."),
+        (["suggest", "alpha", "--limit", "0"], "Suggestion limit must be positive."),
+        (
+            ["ads", "ideas", "alpha", "--limit", "0"],
+            "Keyword idea limit must be positive.",
+        ),
+        (
+            ["gsc", "queries", "https://example.com/", "--limit", "0"],
+            "Query limit must be positive.",
+        ),
+        (
+            ["gsc", "opportunities", "https://example.com/", "--limit", "0"],
+            "Opportunity limit must be positive.",
+        ),
+        (
+            ["competitor", "http://["],
+            "Target is not a valid URL or domain.",
+        ),
+        (
+            ["research", "http://[", "--scenario", "competitor"],
+            "Target is not a valid URL or domain.",
+        ),
     ],
 )
 def test_a_refused_request_still_prints_an_envelope_and_exits_one(
@@ -293,3 +315,59 @@ def test_an_unusable_configuration_never_echoes_the_value_it_rejected(
     assert "s3cret-token" not in completed.stdout
     assert "s3cret-token" not in completed.stderr
     assert "not-a-number" not in completed.stdout
+
+
+def test_an_unknown_strategy_over_mcp_is_an_envelope_not_a_crash(
+    thread_offload: None, tmp_path: Path
+) -> None:
+    """MCP publishes strategies as free strings, so the check belongs in the core.
+
+    The CLI gets an enum from Typer and can never reach this, but an MCP
+    caller hands over whatever it likes. `ExpansionStrategy("nonsense")`
+    raises a bare `ValueError`, which the guard does not recognise as a
+    refusal -- so a typo came back as `Error executing tool expand_keywords`
+    with nothing to say what was wrong.
+    """
+    result = call_tool(
+        tmp_path,
+        "expand_keywords",
+        {"seed": "alpha", "strategies": ["nonsense"]},
+    )
+
+    assert result.is_error is not True
+    assert result.structured_content is not None
+    assert result.structured_content["completeness"] == "empty"
+    reason = cast(str, result.structured_content["completeness_reason"])
+    assert reason.startswith("Unknown expansion strategy.")
+    assert "suffix_alphabet" in reason
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("analyze_competitor", {"target": "http://["}),
+        ("research_keywords", {"target": "http://[", "scenario": "competitor"}),
+    ],
+)
+def test_a_malformed_target_over_mcp_is_an_envelope_not_a_crash(
+    thread_offload: None,
+    tmp_path: Path,
+    name: str,
+    arguments: dict[str, object],
+) -> None:
+    """A netloc with an unclosed bracket is a typo, not a crash in the tool.
+
+    `urlsplit("http://[")` raises a bare `ValueError`, which the guard does not
+    recognise as a refusal: MCP answered `Error executing tool` with nothing to
+    say what was wrong, and the CLI printed a traceback instead of the envelope
+    it documents for exit 1. Both entry points that split a target are pinned,
+    because the two lines that did the splitting were copies of each other.
+    """
+    result = call_tool(tmp_path, name, arguments)
+
+    assert result.is_error is not True
+    assert result.structured_content is not None
+    assert result.structured_content["completeness"] == "empty"
+    assert result.structured_content["completeness_reason"] == (
+        "Target is not a valid URL or domain."
+    )
