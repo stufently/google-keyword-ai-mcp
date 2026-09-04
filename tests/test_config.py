@@ -92,6 +92,10 @@ def test_trends_settings_defaults() -> None:
     assert settings.trends_timezone_minutes == -180
 
 
+def test_cache_sweep_default() -> None:
+    assert Settings().cache_sweep_enabled is True
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

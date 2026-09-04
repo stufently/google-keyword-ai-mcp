@@ -40,6 +40,20 @@ gkai config show --format json
 `gkai doctor` reports provider and database availability. `gkai config show` prints
 the effective configuration with secrets masked.
 
+## Cache maintenance
+
+```bash
+gkai cache status --format json
+gkai cache purge
+gkai cache purge --all --vacuum
+```
+
+`gkai cache status` reports total and expired entry counts, cached payload bytes,
+and `database_bytes`. The latter is the size of the whole SQLite database and its
+sidecars, including saved run history; it is not the cache size. `gkai cache purge`
+removes expired entries by default. `--all` removes every cache entry, and `--vacuum`
+also reclaims unused database pages. These commands do not delete saved runs.
+
 ## Discovery and expansion
 
 ```bash
@@ -108,4 +122,3 @@ gkai keyword inspect <run_id> "running shoes"
 `gkai score` returns scored keywords, `gkai cluster` lexical clusters, `gkai
 explain-score` a component breakdown, `gkai niche analyze` aggregate niche factors,
 and `gkai keyword inspect` provenance for one keyword.
-

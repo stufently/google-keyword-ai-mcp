@@ -27,7 +27,7 @@ src/google_keyword_ai/
   providers/   autocomplete.py expander.py google_ads.py search_console.py
                trends/{models,unofficial,official,provider}.py
   pipeline/    budget.py models.py scenarios.py runs.py executor.py
-  usecases/    doctor suggest expand trends ads gsc research runs analysis limits
+  usecases/    doctor suggest expand trends ads gsc research runs cache analysis limits
   reports/     markdown.py
   cli/main.py  mcp/server.py  data/{alphabets,modifiers}
 ```

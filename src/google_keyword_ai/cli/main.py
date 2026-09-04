@@ -29,6 +29,7 @@ from google_keyword_ai.usecases.analysis import (
     run_niche_analyze,
     run_score,
 )
+from google_keyword_ai.usecases.cache import run_cache_purge, run_cache_status
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
 from google_keyword_ai.usecases.gsc import (
@@ -52,12 +53,14 @@ config_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 ads_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 gsc_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 run_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
+cache_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 niche_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 keyword_app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
 app.add_typer(config_app, name="config")
 app.add_typer(ads_app, name="ads")
 app.add_typer(gsc_app, name="gsc")
 app.add_typer(run_app, name="run")
+app.add_typer(cache_app, name="cache")
 app.add_typer(niche_app, name="niche")
 app.add_typer(keyword_app, name="keyword")
 
@@ -519,6 +522,31 @@ def keyword_inspect_command(
     settings = load_settings()
     configure_logging(settings.log_level)
     _finish(lambda: run_keyword_inspect(settings, run_id, keyword), output_format)
+
+
+@cache_app.command("status")
+def cache_status_command(
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(lambda: run_cache_status(settings), output_format)
+
+
+@cache_app.command("purge")
+def cache_purge_command(
+    purge_all: Annotated[
+        bool, typer.Option("--all", help="Remove every cache entry, not only expired entries.")
+    ] = False,
+    vacuum: Annotated[
+        bool, typer.Option("--vacuum", help="Reclaim unused database pages after deletion.")
+    ] = False,
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    """Remove only cache data; saved research runs remain in place."""
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    _finish(lambda: run_cache_purge(settings, purge_all=purge_all, vacuum=vacuum), output_format)
 
 
 @run_app.command("list")

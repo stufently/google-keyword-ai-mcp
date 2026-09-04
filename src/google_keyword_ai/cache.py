@@ -3,11 +3,22 @@ import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 
+import structlog
+from pydantic import BaseModel
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from google_keyword_ai.config import Settings
 
 PARSER_VERSION: str = "1"
+_PURGE_BATCH_SIZE = 500
+logger = structlog.get_logger(__name__)
+
+
+class CacheCounts(BaseModel):
+    entries: int
+    expired_entries: int
+    payload_bytes: int
 
 
 def build_cache_key(
@@ -36,6 +47,7 @@ class SqliteCache:
     def __init__(self, engine: Engine, settings: Settings) -> None:
         self._engine = engine
         self._settings = settings
+        self._sweep_attempted = False
 
     def get(self, key: str) -> bytes | None:
         if not self._settings.cache_enabled:
@@ -49,14 +61,18 @@ class SqliteCache:
             return None
 
         payload, expires_at = row
-        if expires_at is not None and self._has_expired(expires_at):
+        now = datetime.now(UTC)
+        if expires_at is not None and self._has_expired(expires_at, now):
             with self._engine.begin() as connection:
-                connection.exec_driver_sql("DELETE FROM cache_entries WHERE key = ?", (key,))
+                connection.exec_driver_sql(
+                    "DELETE FROM cache_entries WHERE key = ? AND expires_at IS ?",
+                    (key, expires_at),
+                )
             return None
         return bytes(payload)
 
     @staticmethod
-    def _has_expired(expires_at: str) -> bool:
+    def _has_expired(expires_at: str, now: datetime) -> bool:
         """Say whether a stored expiry has passed, counting an unreadable one as past.
 
         `fromisoformat` raises a bare `ValueError` on a damaged timestamp, and
@@ -76,7 +92,53 @@ class SqliteCache:
             return True
         if deadline.tzinfo is None:
             return True
-        return deadline <= datetime.now(UTC)
+        return deadline <= now
+
+    def purge_expired(self) -> int:
+        now = datetime.now(UTC)
+        with self._engine.connect() as connection:
+            rows = connection.exec_driver_sql(
+                "SELECT key, expires_at FROM cache_entries WHERE expires_at IS NOT NULL"
+            ).all()
+        expired = [
+            (str(key), str(expires_at))
+            for key, expires_at in rows
+            if self._has_expired(str(expires_at), now)
+        ]
+
+        removed = 0
+        for offset in range(0, len(expired), _PURGE_BATCH_SIZE):
+            batch = expired[offset : offset + _PURGE_BATCH_SIZE]
+            with self._engine.begin() as connection:
+                result = connection.exec_driver_sql(
+                    "DELETE FROM cache_entries WHERE key = ? AND expires_at IS ?",
+                    batch,
+                )
+            removed += result.rowcount
+        return removed
+
+    def purge_all(self) -> int:
+        with self._engine.begin() as connection:
+            result = connection.exec_driver_sql("DELETE FROM cache_entries")
+        return result.rowcount
+
+    def counts(self) -> CacheCounts:
+        now = datetime.now(UTC)
+        with self._engine.connect() as connection:
+            entries, payload_bytes = connection.exec_driver_sql(
+                "SELECT count(*), coalesce(sum(length(payload)), 0) FROM cache_entries"
+            ).one()
+            expiries = connection.exec_driver_sql(
+                "SELECT expires_at FROM cache_entries WHERE expires_at IS NOT NULL"
+            ).scalars()
+            expired_entries = sum(
+                self._has_expired(str(expires_at), now) for expires_at in expiries
+            )
+        return CacheCounts(
+            entries=int(entries),
+            expired_entries=expired_entries,
+            payload_bytes=int(payload_bytes),
+        )
 
     def set(
         self,
@@ -91,6 +153,13 @@ class SqliteCache:
     ) -> None:
         if not self._settings.cache_enabled:
             return
+
+        if self._settings.cache_sweep_enabled and not self._sweep_attempted:
+            self._sweep_attempted = True
+            try:
+                self.purge_expired()
+            except SQLAlchemyError as exc:
+                logger.warning("cache_sweep_failed", error=str(exc))
 
         created_at = datetime.now(UTC)
         expires_at = None if ttl_seconds is None else created_at + timedelta(seconds=ttl_seconds)

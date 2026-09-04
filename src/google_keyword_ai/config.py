@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     trends_circuit_breaker_failures: int = 3
     trends_timezone_minutes: int = -180
     cache_enabled: bool = True
+    cache_sweep_enabled: bool = True
     google_ads_developer_token: SecretStr | None = None
     google_ads_customer_id: str | None = None
     google_ads_login_customer_id: str | None = None

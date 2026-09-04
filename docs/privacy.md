@@ -21,9 +21,16 @@ or credential files you manage. Raw HTTP responses from authenticated Google Ads
 and Search Console APIs are not retained by default; normalized cached results and
 saved research output may contain the metrics and query rows used by the tool.
 
-To remove all local cache and run history, stop active `gkai` processes and delete
-the `gkai.sqlite3` file plus its `-wal` and `-shm` sidecars in the same directory.
-This is irreversible; credential files are separate and are not removed.
+To remove all cached responses and reclaim their unused database pages without
+losing saved run history, stop active writers and run:
+
+```bash
+gkai cache purge --all --vacuum
+```
+
+To remove all local cache **and** run history, stop active `gkai` processes and
+delete the `gkai.sqlite3` file plus its `-wal` and `-shm` sidecars in the same
+directory. This is irreversible; credential files are separate and are not removed.
 
 ## Data sent to providers
 
@@ -33,4 +40,3 @@ market criteria. Search Console sends the property, date range, dimensions and
 filters using your credential identity. These requests are subject to Google's
 terms, logging, quotas and privacy practices; do not submit sensitive query seeds
 unless that disclosure is acceptable.
-
