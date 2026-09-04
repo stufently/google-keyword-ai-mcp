@@ -1,6 +1,7 @@
 from collections.abc import Callable
 
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from google_keyword_ai.errors import InvalidConfigurationError
 
@@ -81,19 +82,45 @@ def _migration_3(connection: Connection) -> None:
 MIGRATIONS: list[Callable[[Connection], None]] = [_migration_1, _migration_2, _migration_3]
 
 
-def apply_migrations(engine: Engine) -> int:
-    with engine.connect() as connection:
-        current_version = int(connection.exec_driver_sql("PRAGMA user_version").scalar_one())
-
+def _validate_schema_version(connection: Connection) -> int:
+    current_version = int(connection.exec_driver_sql("PRAGMA user_version").scalar_one())
     if current_version > SCHEMA_VERSION:
         raise InvalidConfigurationError(
             "Database schema is newer than this version of google-keyword-ai: "
             f"database={current_version}, supported={SCHEMA_VERSION}."
         )
+    return current_version
 
-    for migration_index in range(current_version, SCHEMA_VERSION):
-        with engine.begin() as connection:
-            MIGRATIONS[migration_index](connection)
-            connection.exec_driver_sql(f"PRAGMA user_version={migration_index + 1}")
+
+def _begin_immediate(connection: Connection) -> None:
+    # DBAPI autocommit=False keeps an empty transaction open between calls.
+    connection.exec_driver_sql("COMMIT")
+    connection.exec_driver_sql("BEGIN IMMEDIATE")
+
+
+def apply_migrations(engine: Engine) -> int:
+    try:
+        # Reading the version needs no write lock; the loop below takes one for
+        # each migration, which is where the DDL actually happens.
+        with engine.connect() as connection:
+            current_version = _validate_schema_version(connection)
+
+        for migration_index in range(current_version, SCHEMA_VERSION):
+            with engine.connect() as connection:
+                _begin_immediate(connection)
+                try:
+                    current_version = _validate_schema_version(connection)
+                    if current_version <= migration_index:
+                        MIGRATIONS[migration_index](connection)
+                        connection.exec_driver_sql(f"PRAGMA user_version={migration_index + 1}")
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
+    except SQLAlchemyError as exc:
+        # `InvalidConfigurationError` passes through untouched: it is a
+        # `GkaiError`, not a `SQLAlchemyError`, so the refusal of a database
+        # newer than this build keeps its own wording.
+        raise InvalidConfigurationError(f"Could not apply database migrations: {exc}") from exc
 
     return SCHEMA_VERSION

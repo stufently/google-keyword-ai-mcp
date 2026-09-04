@@ -1,3 +1,6 @@
+from multiprocessing import get_context
+from multiprocessing.queues import Queue
+from multiprocessing.synchronize import Barrier
 from pathlib import Path
 
 import pytest
@@ -7,6 +10,30 @@ from google_keyword_ai.config import Settings
 from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.storage.engine import create_engine_for, open_database
 from google_keyword_ai.storage.migrations import MIGRATIONS, SCHEMA_VERSION, apply_migrations
+
+# Enough rounds that a fault showing up in roughly one attempt in eight is
+# caught essentially every time, and few enough to stay under a second or two.
+# A probabilistic guard, deliberately: the journal-mode half of this race
+# depends on how the processes interleave, and no arrangement of them caught it
+# every time — four contenders over eight rounds detected a reintroduced fault
+# about half the time, eight contenders over three rounds rather less. The
+# evidence that the fix works is a measurement rather than this test: with the
+# fault in place the race failed 3 times in 20, with it fixed 0 times in 25.
+# What this test does catch every time is the migration half — a version read
+# outside the transaction, or a migration that does not take the write lock.
+_RACE_ROUNDS = 6
+_RACE_PROCESSES = 4
+
+
+def _open_database_after_barrier(data_dir: Path, barrier: Barrier, results: Queue[str]) -> None:
+    try:
+        barrier.wait()
+        engine = open_database(Settings(data_dir=data_dir))
+    except Exception as exc:
+        results.put(str(exc))
+    else:
+        engine.dispose()
+        results.put("ok")
 
 
 def _upgrade_to(engine: object, version: int) -> None:
@@ -122,3 +149,45 @@ def test_a_database_from_the_future_is_rejected(tmp_path: Path) -> None:
             apply_migrations(engine)
     finally:
         engine.dispose()
+
+
+def test_four_processes_open_one_fresh_database_at_once(tmp_path: Path) -> None:
+    """Opening one fresh database from four processes must succeed in all four.
+
+    This is the ordinary case, not an exotic one: `open_database` runs on every
+    `gkai` invocation and on MCP server startup, so a CLI call landing while the
+    server boots is two processes creating one file.
+
+    The race is run several times over, each round on its own fresh database.
+    That is not a retry — no round is allowed to fail — it is what makes the
+    test a detector at all: a race that shows up in one attempt out of eight is
+    invisible to a test that attempts it once, and the two defects behind this
+    milestone were both of that shape.
+    """
+    context = get_context("spawn")
+    for round_number in range(_RACE_ROUNDS):
+        barrier = context.Barrier(_RACE_PROCESSES)
+        results: Queue[str] = context.Queue()
+        processes = [
+            context.Process(
+                target=_open_database_after_barrier,
+                args=(tmp_path / f"concurrent-{round_number}", barrier, results),
+            )
+            for _process_number in range(_RACE_PROCESSES)
+        ]
+
+        for process in processes:
+            process.start()
+
+        try:
+            for process in processes:
+                process.join(timeout=30)
+            assert all(not process.is_alive() for process in processes)
+            assert [results.get(timeout=5) for _ in processes] == ["ok"] * _RACE_PROCESSES
+        finally:
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+                    process.join()
+            results.close()
+            results.join_thread()

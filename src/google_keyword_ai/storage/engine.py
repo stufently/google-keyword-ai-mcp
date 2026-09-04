@@ -1,3 +1,5 @@
+import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +16,14 @@ def database_path(settings: Settings) -> Path:
 
 BUSY_TIMEOUT_MS = 5000
 
+# The busy timeout and the journal mode are applied first and by hand, in that
+# order: the timeout has to be in force before anything can wait on a lock, and
+# the WAL switch needs handling the others do not. They stay listed here so the
+# set of settings this project depends on is still readable in one place, and so
+# the tests can assert every one of them.
 PRAGMAS: tuple[str, ...] = (
-    "PRAGMA journal_mode=WAL",
     f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}",
+    "PRAGMA journal_mode=WAL",
     "PRAGMA synchronous=NORMAL",
     "PRAGMA foreign_keys=ON",
 )
@@ -34,11 +41,44 @@ def apply_sqlite_pragmas(dbapi_connection: Any) -> None:
     dbapi_connection.autocommit = True
     cursor = dbapi_connection.cursor()
     try:
+        cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        _enable_wal(cursor)
         for statement in PRAGMAS:
             cursor.execute(statement)
     finally:
         cursor.close()
         dbapi_connection.autocommit = previous_autocommit
+
+
+def _enable_wal(cursor: Any) -> None:
+    """Put the database in WAL mode, tolerating another process doing the same.
+
+    The journal mode is a persistent property of the FILE, not of this
+    connection: once any process has set it, every later connection opens a WAL
+    database and nobody needs to set it again. Switching it, though, needs
+    exclusive access, and SQLite's busy handler does not cover that switch --
+    `busy_timeout` buys nothing here, which was measured: with the timeout
+    already in force, four processes opening one fresh database at the same
+    moment still produced one winner and three `database is locked` failures,
+    raised before any migration ran.
+
+    So the switch is retried inside the same time budget the busy timeout gives
+    every other statement. Once the neighbour that held the lock is done the
+    database is already in WAL, and then the pragma is a no-op that needs no
+    exclusive lock -- the retry succeeds rather than having to detect anything.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    while True:
+        try:
+            cursor.execute("PRAGMA journal_mode=WAL")
+            return
+        except sqlite3.OperationalError:
+            # Nothing to check between attempts: on a database that is already
+            # in WAL the pragma is a no-op needing no exclusive lock, so the
+            # very next attempt succeeds the moment the neighbour is done.
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
 
 
 def create_engine_for(settings: Settings) -> Engine:
