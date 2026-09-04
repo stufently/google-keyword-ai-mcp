@@ -63,11 +63,20 @@ class SqliteCache:
         that is no `GkaiError`: a single corrupt row would reach the caller as a
         crash rather than as a miss. An entry whose expiry cannot be read has no
         knowable lifetime left, so it is dropped and fetched again.
+
+        Parsing is not the only hazard. Everything written here carries a zone,
+        because `set` derives the value from `datetime.now(UTC)` -- but a value
+        that parses and happens to be naive (`2026-01-01T00:00:00`) reaches the
+        comparison and raises `TypeError` there instead, which a guard against
+        `ValueError` alone does not catch.
         """
         try:
-            return datetime.fromisoformat(expires_at) <= datetime.now(UTC)
+            deadline = datetime.fromisoformat(expires_at)
         except ValueError:
             return True
+        if deadline.tzinfo is None:
+            return True
+        return deadline <= datetime.now(UTC)
 
     def set(
         self,

@@ -1,6 +1,8 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from google_keyword_ai.cache import SqliteCache, build_cache_key
 from google_keyword_ai.config import Settings
 from google_keyword_ai.storage.engine import open_database
@@ -77,12 +79,25 @@ def test_disabled_cache_does_not_read_or_write(data_dir: Path) -> None:
         engine.dispose()
 
 
-def test_an_unreadable_expiry_is_a_miss_rather_than_a_crash(settings: Settings) -> None:
+@pytest.mark.parametrize(
+    "stored",
+    [
+        pytest.param("not a timestamp", id="unparseable"),
+        pytest.param("2026-01-01T00:00:00", id="parses_but_carries_no_zone"),
+    ],
+)
+def test_an_expiry_that_cannot_be_judged_is_a_miss(settings: Settings, stored: str) -> None:
     """A damaged expiry has no knowable lifetime, so the entry is refetched.
 
     `fromisoformat` raises a bare `ValueError`, which is no `GkaiError`: one
     corrupt row would otherwise reach the caller as a crash instead of a miss,
     and every provider in the project reads its cache through here.
+
+    Parsing is not the only hazard. Everything written here carries a zone,
+    because `set` derives it from `datetime.now(UTC)` — but a value that parses
+    and happens to be naive gets past `fromisoformat` and raises `TypeError` at
+    the comparison instead, which a guard against `ValueError` alone does not
+    catch. The crash came back through the other half of the same line.
     """
     engine = open_database(settings)
     try:
@@ -90,8 +105,7 @@ def test_an_unreadable_expiry_is_a_miss_rather_than_a_crash(settings: Settings) 
         _set(cache, "damaged")
         with engine.begin() as connection:
             connection.exec_driver_sql(
-                "UPDATE cache_entries SET expires_at = ? WHERE key = ?",
-                ("not a timestamp", "damaged"),
+                "UPDATE cache_entries SET expires_at = ? WHERE key = ?", (stored, "damaged")
             )
 
         assert cache.get("damaged") is None
