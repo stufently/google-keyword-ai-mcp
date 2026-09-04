@@ -44,6 +44,7 @@ def test_pragma_and_cache_schema_are_created(settings: Settings) -> None:
             "payload",
             "created_at",
             "expires_at",
+            "last_read_at",
         }
         assert any(
             index["column_names"] == ["expires_at"]
