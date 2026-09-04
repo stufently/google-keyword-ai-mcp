@@ -283,6 +283,22 @@ class UnofficialTrendsClient:
         for widget_id in CONSUMED_WIDGETS:
             widget = widgets.get(widget_id)
             if widget is None:
+                per_keyword = sorted(name for name in widgets if name.startswith(f"{widget_id}_"))
+                if per_keyword:
+                    # A comparison splits some widgets one per keyword and
+                    # suffixes their ids, so the plain name is simply not there.
+                    # Silence would read as "Google has none of this", when in
+                    # fact it has one set per keyword -- and they cannot be
+                    # merged into the single list this result carries, because
+                    # each is normalised inside its own widget. Comparing values
+                    # across them would be exactly what `normalization_scope`
+                    # exists to prevent.
+                    self.warnings.append(
+                        f"{widget_id} came back once per keyword "
+                        f"({', '.join(per_keyword)}); a comparison normalises each "
+                        "separately, so they are not merged into one list and are "
+                        "not reported here."
+                    )
                 continue
             path = WIDGET_PATHS[widget_id]
             if requested_widget:

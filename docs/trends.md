@@ -48,6 +48,15 @@ maximum in that particular response. Results of separate requests cannot be
 compared directly. The `gkai trends compare` command and the `analyze_trends`
 MCP tool send up to five keywords in one request.
 
+A comparison splits some widgets one per keyword and suffixes their ids:
+`explore` for two keywords returns `TIMESERIES` and `GEO_MAP` under their plain
+names but related queries only as `RELATED_QUERIES_0` and `RELATED_QUERIES_1`.
+Those are not merged into the single list the result carries -- each is
+normalised inside its own widget, so one list of values across keywords would
+mean nothing -- and the reply says so in a warning rather than reporting no
+related queries at all. `tests/fixtures/trends/explore_compare.json` is the live
+capture this is read from.
+
 `normalization_scope` is the first 16 characters of the SHA-256 of canonical
 JSON containing the keywords, country, timeframe and language. Identical
 parameters produce an identical scope, different parameters a different one.

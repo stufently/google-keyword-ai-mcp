@@ -27,9 +27,19 @@ _NETWORK = "GOOGLE_SEARCH_AND_PARTNERS"
 
 
 class MonthlyVolume(BaseModel):
-    year: int
+    """One month of the search-volume series.
+
+    Both numbers are optional in Google's own schema, and it says what a null
+    means: "A null value indicates the search volume is unavailable for that
+    month." Reading an unset field with a plain attribute access returns 0, and
+    a zero here is a measurement -- "nobody searched for this" -- which is the
+    opposite claim. Left as required, a month Google could not measure was
+    published, and cached for a week, as a month of no demand.
+    """
+
+    year: int | None = None
     month: str
-    monthly_searches: int
+    monthly_searches: int | None = None
 
 
 class KeywordMetrics(BaseModel):
@@ -77,6 +87,33 @@ class AdsSeed(BaseModel):
 
 
 _IDEAS_ADAPTER = TypeAdapter(list[KeywordIdea])
+
+
+def _client_setup_errors() -> tuple[type[BaseException], ...]:
+    """Everything building the client can raise that is not already a project error.
+
+    The version is checked by the installed client, not by any validator here,
+    and it complains with a bare `ValueError`. Credentials are exchanged for a
+    token while the client is built, so a wrong client id fails with a
+    `RefreshError`. Neither is a `GkaiError`, and both used to escape every
+    guard on both facades -- a traceback with empty stdout on the CLI, an opaque
+    tool failure on MCP, and a dead research run where a `partial` was owed.
+    """
+    types: list[type[BaseException]] = [ValueError, AttributeError, ImportError, OSError]
+    try:
+        from google.auth.exceptions import GoogleAuthError
+    except ImportError:  # pragma: no cover - google-auth ships with the client
+        return tuple(types)
+    types.append(cast(type[BaseException], GoogleAuthError))
+    return tuple(types)
+
+
+def _is_credential_refusal(exc: BaseException) -> bool:
+    try:
+        from google.auth.exceptions import GoogleAuthError, TransportError
+    except ImportError:  # pragma: no cover - google-auth ships with the client
+        return False
+    return isinstance(exc, GoogleAuthError) and not isinstance(exc, TransportError)
 
 
 def _library_exception_types() -> tuple[type[BaseException], ...]:
@@ -142,9 +179,9 @@ def _parse_metrics(metrics: object) -> KeywordMetrics:
     raw_months = cast(Iterable[object], getattr(metrics, "monthly_search_volumes", ()))
     monthly_volumes = [
         MonthlyVolume(
-            year=int(cast(int, _required_value(volume, "year"))),
+            year=_optional_int(volume, "year"),
             month=_enum_name(getattr(volume, "month", None)) or "UNSPECIFIED",
-            monthly_searches=int(cast(int, _required_value(volume, "monthly_searches"))),
+            monthly_searches=_optional_int(volume, "monthly_searches"),
         )
         for volume in raw_months
     ]
@@ -214,10 +251,29 @@ class GoogleAdsProvider(Provider):
         )
 
     def build_service(self) -> object:
+        """Build the Keyword Planner client, refusing rather than crashing.
+
+        Two things here raise something that is no `GkaiError`. The library is
+        an optional extra, so the import raises `ModuleNotFoundError` on an
+        installation that has the credentials but not the package -- and
+        `is_available()` reads only settings, so `gkai doctor` calls that
+        provider ready. And `google_ads_api_version` has no validator, so a
+        version the installed client does not carry raises a bare `ValueError`
+        from inside it. Either one escaped every guard on both facades: a
+        traceback with empty stdout on the CLI, an opaque tool failure on MCP,
+        and in the research pipeline the whole run died where it should have
+        degraded to `partial`.
+        """
         if self._service_factory is not None:
             return self._service_factory()
 
-        from google.ads.googleads.client import GoogleAdsClient  # type: ignore[import-untyped]
+        try:
+            from google.ads.googleads.client import GoogleAdsClient  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise ProviderUnavailableError(
+                "The google-ads library is not installed; "
+                "install the 'ads' extra to use Google Ads."
+            ) from exc
 
         developer_token = self._settings.google_ads_developer_token
         client_id = self._settings.google_ads_client_id
@@ -239,11 +295,21 @@ class GoogleAdsProvider(Provider):
         }
         if self._settings.google_ads_login_customer_id:
             config["login_customer_id"] = self._settings.google_ads_login_customer_id
-        client = GoogleAdsClient.load_from_dict(
-            config,
-            version=self._settings.google_ads_api_version,
-        )
-        return client.get_service("KeywordPlanIdeaService")
+        try:
+            client = GoogleAdsClient.load_from_dict(
+                config,
+                version=self._settings.google_ads_api_version,
+            )
+            return client.get_service("KeywordPlanIdeaService")
+        except _client_setup_errors() as exc:
+            if _is_credential_refusal(exc):
+                raise AuthenticationError(
+                    f"Google Ads refused the configured credentials: {exc}"
+                ) from exc
+            raise InvalidConfigurationError(
+                f"The Google Ads client could not be built with API version "
+                f"{self._settings.google_ads_api_version}: {exc}"
+            ) from exc
 
     def _require_available(self) -> str:
         if not self.is_available():

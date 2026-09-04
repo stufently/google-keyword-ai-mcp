@@ -15,6 +15,7 @@ from google_keyword_ai.errors import (
     AuthenticationError,
     GkaiError,
     InvalidConfigurationError,
+    NetworkError,
     ProviderUnavailableError,
     RateLimitError,
 )
@@ -67,14 +68,33 @@ class SiteProperty(BaseModel):
 
 
 def _translate_http_error(exc: BaseException) -> GkaiError:
-    status = int(cast(Any, exc).resp.status)
-    if status in {401, 403}:
+    response = getattr(exc, "resp", None)
+    status = getattr(response, "status", None)
+    if status is None:
+        # No HTTP reply at all: the credentials could not be refreshed, or the
+        # request never reached Google. A refused token is an authentication
+        # problem the caller can act on; anything else is the network.
+        if _is_auth_error(exc):
+            return AuthenticationError(f"Search Console credentials were refused: {exc}")
+        return NetworkError(f"Search Console could not be reached: {exc}")
+    code = int(status)
+    if code in {401, 403}:
         return AuthenticationError(
-            f"Search Console authentication or authorization failed ({status})."
+            f"Search Console authentication or authorization failed ({code})."
         )
-    if status == 429:
+    if code == 429:
         return RateLimitError("Search Console rate limit was exceeded (429).")
-    return ApiError(f"Search Console API request failed ({status}).")
+    return ApiError(f"Search Console API request failed ({code}).")
+
+
+def _is_auth_error(exc: BaseException) -> bool:
+    try:
+        from google.auth.exceptions import GoogleAuthError, TransportError
+    except ImportError:  # pragma: no cover - google-auth ships with the client
+        return False
+    # A transport failure is reported through the auth package too, and that is
+    # the network rather than the credentials.
+    return isinstance(exc, GoogleAuthError) and not isinstance(exc, TransportError)
 
 
 def _as_date(value: date | str, field_name: str) -> date:
@@ -164,10 +184,23 @@ class SearchConsoleProvider(Provider):
             ) from exc
 
     def build_service(self) -> object:
+        """Build the Search Analytics client, refusing rather than crashing.
+
+        The client is an optional extra, and `is_available()` reads only whether
+        the credentials file exists -- so an installation with credentials but
+        without the package answers "ready" in `gkai doctor` and then raised
+        `ModuleNotFoundError` past every guard on both facades.
+        """
         if self._service_factory is not None:
             return self._service_factory()
 
-        from googleapiclient.discovery import build  # type: ignore[import-untyped]
+        try:
+            from googleapiclient.discovery import build  # type: ignore[import-untyped]
+        except ImportError as exc:
+            raise ProviderUnavailableError(
+                "The google-api-python-client library is not installed; "
+                "install the 'gsc' extra to use Search Console."
+            ) from exc
 
         return build(
             "searchconsole",
@@ -449,7 +482,7 @@ class SearchConsoleProvider(Provider):
             current_day += timedelta(days=1)
 
         result = SearchAnalyticsPage(
-            rows=all_rows,
+            rows=_fold_days(all_rows),
             truncated=truncated,
             truncation_reason=truncation_reason,
         )
@@ -457,7 +490,77 @@ class SearchConsoleProvider(Provider):
         return result
 
 
-def _http_error_type() -> type[BaseException]:
+def _fold_days(rows: Sequence[SearchAnalyticsRow]) -> list[SearchAnalyticsRow]:
+    """Fold the per-day requests back into the range the caller asked for.
+
+    Splitting the window into one request per day is forced by the 25,000-row
+    limit on `rowLimit`; it is an extraction strategy, not a change to the
+    question. Left concatenated, the same query came back once per day, each row
+    carrying that day's numbers, with no date among the keys to say so and an
+    envelope labelled with the whole window. Every reader downstream then took a
+    single day's figure for the range: `--limit` sliced the first day's queries,
+    the opportunity thresholds tested one day's impressions against a window's
+    worth of a minimum, and a qualifying query produced one duplicate
+    opportunity per day it appeared.
+
+    Clicks and impressions add. CTR is recomputed over the totals rather than
+    averaged, because a mean of daily ratios is not the ratio of the sums.
+    Position is averaged by impressions, which is exactly how Google averages it
+    over a range -- each daily figure is itself the mean over that day's
+    impressions -- so this reproduces the API's own answer rather than
+    approximating it.
+    """
+    folded: dict[tuple[tuple[str, str], ...], list[SearchAnalyticsRow]] = {}
+    for row in rows:
+        folded.setdefault(tuple(sorted(row.keys.items())), []).append(row)
+
+    merged: list[SearchAnalyticsRow] = []
+    for group in folded.values():
+        if len(group) == 1:
+            merged.append(group[0])
+            continue
+        clicks = sum(row.clicks for row in group)
+        impressions = sum(row.impressions for row in group)
+        position = (
+            sum(row.position * row.impressions for row in group) / impressions
+            if impressions
+            # No impressions means no weights, and a weighted mean of nothing is
+            # undefined. The plain mean is the only honest answer left.
+            else sum(row.position for row in group) / len(group)
+        )
+        merged.append(
+            SearchAnalyticsRow(
+                keys=group[0].keys,
+                clicks=clicks,
+                impressions=impressions,
+                ctr=clicks / impressions if impressions else 0.0,
+                position=position,
+            )
+        )
+    # Most-clicked first, the order a ranged request comes back in. The days
+    # arrived in date order, so concatenation left the ordering meaningless.
+    merged.sort(key=lambda row: (-row.clicks, -row.impressions, row.position))
+    return merged
+
+
+def _http_error_type() -> tuple[type[BaseException], ...]:
+    """Every library failure a Search Console call can raise.
+
+    `execute()` refreshes the credentials before it sends anything, so a revoked
+    or expired refresh token raises `RefreshError`, and a name-resolution or
+    connect failure raises out of `httplib2` -- neither of them an `HttpError`,
+    neither of them a `GkaiError`. With only `HttpError` caught, a property
+    whose access had been withdrawn produced a traceback and an empty stdout on
+    a CLI that documents exit 1 as a verdict which still prints an envelope.
+    """
     from googleapiclient.errors import HttpError  # type: ignore[import-untyped]
 
-    return cast(type[BaseException], HttpError)
+    types: list[type[BaseException]] = [cast(type[BaseException], HttpError), OSError]
+    try:
+        from google.auth.exceptions import GoogleAuthError, TransportError
+    except ImportError:  # pragma: no cover - google-auth ships with the client
+        return tuple(types)
+    types.extend(
+        [cast(type[BaseException], GoogleAuthError), cast(type[BaseException], TransportError)]
+    )
+    return tuple(types)

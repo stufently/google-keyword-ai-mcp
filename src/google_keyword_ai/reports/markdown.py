@@ -5,6 +5,7 @@ from google_keyword_ai.pipeline.models import ResearchData
 from google_keyword_ai.scoring import (
     KeywordScore,
     compute_trend_growth,
+    trend_growth_gap,
     trend_series_keyword,
 )
 
@@ -39,9 +40,26 @@ def render_markdown(
         f"Analyzed {len(data.keywords)} keywords in {len(clusters)} clusters.",
     ]
 
-    if scores:
-        average = sum(score.score for score in scores) / len(scores)
-        lines.append(f"Average opportunity score: {average:.2f}/100.")
+    # A keyword no component could be computed for scores 0.0 with confidence
+    # "none". Averaging those in turns "we could not measure this" into "this is
+    # worth nothing", which the scoring guide expressly refuses -- and it makes
+    # the headline number FALL as the run discovers more keywords, with nothing
+    # about the niche having changed.
+    scored = [score for score in scores if score.components_available]
+    if scored:
+        average = sum(score.score for score in scored) / len(scored)
+        lines.append(f"Average opportunity score: {average:.2f}/100 across {len(scored)} keywords.")
+        unscored = len(scores) - len(scored)
+        if unscored:
+            lines.append(
+                f"{unscored} of {len(scores)} keywords had no measurable component and are "
+                "left out of that average rather than counted as zero."
+            )
+    elif scores:
+        lines.append(
+            f"None of the {len(scores)} keywords had a measurable component, so no average "
+            "opportunity score can be given."
+        )
     else:
         lines.append("No keyword scores are available because no keywords were returned.")
 
@@ -73,10 +91,7 @@ def render_markdown(
     if data.trends is None:
         lines.append("No Trends data is available because the source was not used or unavailable.")
     elif growth is None:
-        lines.append(
-            "Trend growth is unavailable: the timeline does not offer two fully measured "
-            "quarters to compare."
-        )
+        lines.append(f"Trend growth is unavailable: {trend_growth_gap(data.trends)}.")
     else:
         series = trend_series_keyword(data.trends)
         subject = "one series" if series is None else f"the series for `{_cell(series)}`"

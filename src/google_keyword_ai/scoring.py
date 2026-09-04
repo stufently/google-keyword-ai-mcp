@@ -55,6 +55,7 @@ def score_keyword(
     *,
     trend_growth: float | None = None,
     trend_source: str | None = None,
+    trend_gap: str | None = None,
 ) -> KeywordScore:
     """Score one keyword, naming where each component came from.
 
@@ -83,7 +84,7 @@ def score_keyword(
         "the run's Trends series" if trend_source is None else f"Trends series {trend_source!r}"
     )
     trend_explanation = (
-        "Trend unavailable because a comparable eight-point timeline is missing."
+        f"Trend unavailable because {trend_gap or 'no growth figure was supplied'}."
         if trend_growth is None
         else (
             f"Trend growth {trend_growth:+.2%} from {series} gives {trend:.2f}/100 "
@@ -168,6 +169,30 @@ def _is_measured(point: TrendPoint) -> bool:
     collapsed". An absent `hasData` predates the field and is trusted.
     """
     return bool(point.values) and (not point.has_data or bool(point.has_data[0]))
+
+
+def trend_growth_gap(trends: TrendsResult | None) -> str | None:
+    """Name the reason there is no growth figure, or None if there is one.
+
+    `compute_trend_growth` has three ways to answer "no", and both messages
+    written for it covered only two: a timeline that is too short and a window
+    with an unmeasured week. The third is a previous quarter that averaged
+    zero -- eight fully measured points, two whole quarters to compare, and no
+    baseline to divide by. Reported as a missing or unmeasured timeline, that
+    sends the reader looking for data which is right there.
+    """
+    if trends is None:
+        return "no Trends data was collected"
+    if len(trends.timeline) < 8:
+        return "the timeline is shorter than the eight points a comparison needs"
+    quarter = len(trends.timeline) // 4
+    latest = trends.timeline[-quarter:]
+    previous = trends.timeline[-2 * quarter : -quarter]
+    if not all(_is_measured(point) for point in (*latest, *previous)):
+        return "one of the two quarters being compared has a week Google could not measure"
+    if sum(point.values[0] for point in previous) == 0:
+        return "the previous quarter measured no interest at all, so growth has no baseline"
+    return None
 
 
 def compute_trend_growth(trends: TrendsResult | None) -> float | None:

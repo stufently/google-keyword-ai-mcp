@@ -19,7 +19,11 @@ Only the read-only scope is requested.
 
 The Search Analytics API accepts at most 25,000 rows in `rowLimit`. The provider
 therefore requests each day separately and pages within that day using
-`startRow`.
+`startRow`, then folds the days back into the range that was asked for: clicks
+and impressions add, CTR is recomputed over the totals rather than averaged, and
+position is averaged by impressions — which is how Google averages it over a
+range, so the result matches a single ranged request rather than approximating
+one. Rows come back most-clicked first.
 
 About 50,000 rows per property, search type, and day is an upper bound on what
 the API exposes, not a guarantee that the response is complete. When collection

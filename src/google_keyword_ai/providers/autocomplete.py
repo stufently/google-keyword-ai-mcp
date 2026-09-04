@@ -6,7 +6,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from google_keyword_ai.cache import PARSER_VERSION, SqliteCache, build_cache_key
 from google_keyword_ai.config import Settings
-from google_keyword_ai.errors import ApiError, GkaiError
+from google_keyword_ai.errors import ApiError, GkaiError, RateLimitError
 from google_keyword_ai.http import request_with_retries
 from google_keyword_ai.market import Market
 from google_keyword_ai.providers.base import Provider, ProviderInfo
@@ -81,6 +81,14 @@ class AutocompleteProvider(Provider):
             suggestions = await self._suggest_from_endpoint(
                 PRIMARY_ENDPOINT, "chrome", query, market
             )
+        except RateLimitError:
+            # Not something a second host answers. Google asked this run to slow
+            # down; catching it with every other failure discarded the message,
+            # the status and the advertised delay, and fired a fresh request at
+            # the other endpoint -- turning a throttled fan-out of 400 requests
+            # into 1600, all of them while being throttled, and reporting the
+            # run complete because the fallback happened to answer.
+            raise
         except GkaiError:
             suggestions = await self._suggest_from_endpoint(
                 FALLBACK_ENDPOINT, "firefox", query, market

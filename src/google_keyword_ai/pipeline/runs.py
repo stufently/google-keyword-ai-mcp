@@ -242,6 +242,20 @@ class RunStore:
             ),
         )
 
+    def mark_running(self, run_id: str) -> None:
+        """Say that an attempt has started, without touching what it may find.
+
+        Narrower than `finish` on purpose: `finish` also writes `result` and
+        `error`, so calling it to set a status would clear the stored result of
+        the previous attempt before the new one has produced anything to replace
+        it with -- and a crash in between would leave the run with neither.
+        """
+        with self._engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE runs SET status = ?, updated_at = ? WHERE run_id = ?",
+                (RunStatus.RUNNING.value, datetime.now(UTC).isoformat(), run_id),
+            )
+
     def finish(
         self,
         run_id: str,

@@ -126,6 +126,15 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
                 seed_keyword=current.seed_keyword,
             )
             executor = RunExecutor(store, scenario, stages)
+            # The status has to describe THIS attempt. `finish` below reads it
+            # back to learn whether the executor failed, and the executor only
+            # ever writes `failed` -- it writes nothing at all on success. Left
+            # as it was, a run that failed once was written back as failed
+            # forever, however well the retry went, and `set_versions` was
+            # skipped with it: the record kept the old application version, so
+            # every later resume found its checkpoints stale, discarded them and
+            # spent the Google Ads budget again.
+            store.mark_running(current.run_id)
             data = await executor.execute(current, context, resume=True)
             if current.limit is not None:
                 data.keywords = data.keywords[: current.limit]

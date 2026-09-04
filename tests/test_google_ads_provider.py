@@ -1,3 +1,4 @@
+import builtins
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -5,6 +6,7 @@ from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest import mock
 
 import anyio
 import anyio.to_thread
@@ -437,3 +439,133 @@ def test_every_page_after_the_first_is_throttled(tmp_path: Path) -> None:
     assert service.page_fetches == 3
     # One for the initial call plus one before each of the two extra pages.
     assert limiter.acquisitions == 3
+
+
+def test_a_month_google_could_not_measure_is_not_a_month_of_no_demand(tmp_path: Path) -> None:
+    """`monthly_searches` is optional in Google's schema, and null means unknown.
+
+    Google's own words: "A null value indicates the search volume is unavailable
+    for that month." Reading an unset proto field with a plain attribute access
+    returns 0, and a zero here is a measurement — nobody searched for this —
+    which is the opposite claim, published and then cached for a week. The
+    project already refuses this exact confusion on the Trends side, where a
+    week marked `hasData: false` still arrives carrying a value of zero.
+    """
+
+    class Unset:
+        """A proto-plus message whose optional fields are not set."""
+
+        def __init__(self, present: dict[str, object], absent: set[str]) -> None:
+            self._present = present
+            self._absent = absent
+            self._pb = SimpleNamespace(HasField=lambda field: field not in absent)
+
+        def __getattr__(self, field: str) -> object:
+            return self._present.get(field, 0)
+
+    metrics = _metrics()
+    metrics.monthly_search_volumes = [
+        Unset(
+            {"year": 2026, "month": SimpleNamespace(name="AUGUST")},
+            absent={"monthly_searches"},
+        )
+    ]
+    service = FakeService()
+    service.generate_keyword_historical_metrics = (  # type: ignore[method-assign]
+        lambda *, request: SimpleNamespace(
+            results=[SimpleNamespace(text="keyword", keyword_metrics=metrics)]
+        )
+    )
+    provider, engine = _provider(_credentials(tmp_path / "data"), service)
+    try:
+        ideas = anyio.run(provider.historical_metrics, ["keyword"], Market.parse("en", "US"))
+    finally:
+        engine.dispose()
+
+    volume = ideas[0].metrics.monthly_search_volumes[0]
+    assert volume.year == 2026
+    assert volume.monthly_searches is None, "an unmeasured month must not read as zero searches"
+
+
+def test_a_missing_client_library_is_a_refusal_rather_than_a_crash(tmp_path: Path) -> None:
+    """`is_available()` reads settings, not whether the package is installed.
+
+    The library is an optional extra, so an installation carrying the
+    credentials but not the package answers "ready" in `gkai doctor` and then
+    raised `ModuleNotFoundError` past every guard on both facades — a traceback
+    with empty stdout where the contract promises an envelope.
+    """
+    settings = _credentials(tmp_path / "data")
+    provider, engine = _provider(settings, FakeService())
+    provider._service_factory = None
+    real_import = builtins.__import__
+
+    def without_google_ads(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name.startswith("google.ads"):
+            raise ModuleNotFoundError("No module named 'google.ads'")
+        return real_import(name, *args, **kwargs)
+
+    try:
+        with (
+            mock.patch.object(builtins, "__import__", without_google_ads),
+            pytest.raises(ProviderUnavailableError) as raised,
+        ):
+            provider.build_service()
+    finally:
+        engine.dispose()
+
+    assert "not installed" in raised.value.message
+
+
+@pytest.mark.parametrize(
+    ("raised_by_client", "expected", "fragment"),
+    [
+        pytest.param(
+            ValueError("Specified service does not exist in Google Ads API v1."),
+            InvalidConfigurationError,
+            "could not be built with API version",
+            id="unknown_api_version",
+        ),
+        pytest.param(
+            None,
+            AuthenticationError,
+            "refused the configured credentials",
+            id="refused_credentials",
+        ),
+    ],
+)
+def test_a_client_that_cannot_be_built_is_a_refusal_rather_than_a_crash(
+    tmp_path: Path,
+    raised_by_client: BaseException | None,
+    expected: type[Exception],
+    fragment: str,
+) -> None:
+    """Building the client is where two non-`GkaiError` failures live.
+
+    `google_ads_api_version` has no validator — the installed client checks it
+    and complains with a bare `ValueError`. And credentials are exchanged for a
+    token while the client is built, so a wrong client id fails with a
+    `RefreshError`. Both escaped every guard on both facades: a typo in one
+    environment variable took the whole research run down where a `partial` was
+    owed.
+    """
+    from google.auth.exceptions import RefreshError
+
+    failure = raised_by_client
+    if failure is None:
+        failure = RefreshError("invalid_client: The OAuth client was not found.")  # type: ignore[no-untyped-call]
+    provider, engine = _provider(_credentials(tmp_path / "data"), FakeService())
+    provider._service_factory = None
+    try:
+        with (
+            mock.patch(
+                "google.ads.googleads.client.GoogleAdsClient.load_from_dict",
+                side_effect=failure,
+            ),
+            pytest.raises(expected) as raised,
+        ):
+            provider.build_service()
+    finally:
+        engine.dispose()
+
+    assert fragment in raised.value.message  # type: ignore[attr-defined]

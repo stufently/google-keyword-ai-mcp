@@ -125,10 +125,19 @@ class BudgetGuard:
         self._cut = limit_field
 
     def _record_spend(self, kind: str, amount: int = 1) -> None:
+        """Write down work that has already happened.
+
+        This is not a second gate. `can_spend` is the gate, and asking it again
+        here made the record conditional on permission the work no longer needed:
+        the fan-out and its keywords are counted after they are collected, and
+        `can_spend` refuses unconditionally once the runtime ceiling is past --
+        which, for a run the expander stopped on that very ceiling, is always.
+        The result was `spend.autocomplete_queries == 0` beside
+        `expansion.queries_executed == 47`, in exactly the runs whose cost a
+        caller most wants to read.
+        """
         spend_field, _ = self._validate_kind(kind)
         self._validate_amount(amount)
-        if not self.can_spend(kind, amount):
-            return
         setattr(self._spend, spend_field, int(getattr(self._spend, spend_field)) + amount)
         self._refresh_elapsed()
 

@@ -14,6 +14,7 @@ from google_keyword_ai.scoring import (
     KeywordScore,
     compute_trend_growth,
     score_keyword,
+    trend_growth_gap,
     trend_series_keyword,
 )
 from google_keyword_ai.storage.engine import open_database
@@ -101,8 +102,9 @@ def _load_research(settings: Settings, run_id: str) -> tuple[ResearchData | None
 def _scores(data: ResearchData, settings: Settings) -> list[KeywordScore]:
     growth = compute_trend_growth(data.trends)
     source = trend_series_keyword(data.trends)
+    gap = trend_growth_gap(data.trends)
     return [
-        score_keyword(keyword, settings, trend_growth=growth, trend_source=source)
+        score_keyword(keyword, settings, trend_growth=growth, trend_source=source, trend_gap=gap)
         for keyword in data.keywords
     ]
 
@@ -150,6 +152,7 @@ def run_explain_score(
             settings,
             trend_growth=compute_trend_growth(research.trends),
             trend_source=trend_series_keyword(research.trends),
+            trend_gap=trend_growth_gap(research.trends),
         ),
         run_id=run_id,
     )

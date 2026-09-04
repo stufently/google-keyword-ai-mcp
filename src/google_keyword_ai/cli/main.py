@@ -18,6 +18,7 @@ from google_keyword_ai.reports.markdown import render_markdown
 from google_keyword_ai.scoring import (
     compute_trend_growth,
     score_keyword,
+    trend_growth_gap,
     trend_series_keyword,
 )
 from google_keyword_ai.usecases.ads import run_ads_historical, run_ads_ideas, run_competitor
@@ -417,7 +418,13 @@ def research(
         growth = compute_trend_growth(result.data.trends)
         source = trend_series_keyword(result.data.trends)
         scores = [
-            score_keyword(keyword, settings, trend_growth=growth, trend_source=source)
+            score_keyword(
+                keyword,
+                settings,
+                trend_growth=growth,
+                trend_source=source,
+                trend_gap=trend_growth_gap(result.data.trends),
+            )
             for keyword in result.data.keywords
         ]
         clusters = cluster_keywords([keyword.keyword for keyword in result.data.keywords], settings)

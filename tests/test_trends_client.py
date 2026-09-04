@@ -591,3 +591,52 @@ async def test_an_explore_offering_nothing_to_fetch_is_an_answer(tmp_path: Path)
     # answer would not be cached, and with the threshold at one the breaker would
     # have refused the second fetch outright.
     assert second_calls == 1, "an answer with no widgets to fetch was not cached"
+
+
+@pytest.mark.anyio
+async def test_a_comparison_says_that_related_queries_came_per_keyword() -> None:
+    """A widget split per keyword is not a widget Google does not have.
+
+    `explore_compare.json` is a live two-keyword reply: Google returns
+    `TIMESERIES` and `GEO_MAP` under their plain names, but related queries only
+    as `RELATED_QUERIES_0` and `RELATED_QUERIES_1`. Looking the plain name up
+    found nothing, and an absent widget is treated as Google's own answer -- so
+    every comparison quietly reported no related queries at all and said
+    nothing about it. They are still not merged: each is normalised inside its
+    own widget, so one list of values across keywords would mean nothing.
+    """
+    explore_payload = fixture("explore_compare.json")
+    settings = Settings(
+        http_max_attempts=1,
+        trends_circuit_breaker_failures=1,
+        trends_pacing_seconds=0.001,
+    )
+    async with httpx.AsyncClient() as http_client:
+        trends = make_client(settings, http_client)
+        with respx.mock(assert_all_called=False) as router:
+            router.get(WARMUP_URL).mock(return_value=httpx.Response(405))
+            explore = router.get(EXPLORE_URL).mock(
+                return_value=httpx.Response(200, text=explore_payload)
+            )
+            widgetdata = router.get(url__startswith=WIDGETDATA_URL).mock(
+                return_value=httpx.Response(200, text=fixture("multiline_popular.json"))
+            )
+            result = await trends.fetch(
+                ["недвижимость", "ипотека"], geo="RU", timeframe="today 12-m", hl="ru"
+            )
+            # With the threshold at one, a second comparison proves the split did
+            # not count as a failed request: an outage would have shut the door.
+            await trends.fetch(
+                ["недвижимость", "ипотека"], geo="RU", timeframe="today 12-m", hl="ru"
+            )
+            assert explore.call_count == 2
+
+    assert not result.related.top and not result.related.rising
+    assert any("RELATED_QUERIES came back once per keyword" in w for w in trends.warnings), (
+        trends.warnings
+    )
+    assert "RELATED_QUERIES_0" in trends.warnings[0] and "RELATED_QUERIES_1" in trends.warnings[0]
+    # The plain-named widgets are still fetched, so this is a partial answer and
+    # not an outage: the breaker must not count it and the cache may keep it.
+    assert widgetdata.call_count == 4
+    assert not trends.all_widgets_failed()

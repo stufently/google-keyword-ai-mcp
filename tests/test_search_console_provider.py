@@ -20,6 +20,7 @@ from google_keyword_ai.errors import (
     ApiError,
     AuthenticationError,
     InvalidConfigurationError,
+    NetworkError,
     ProviderUnavailableError,
     RateLimitError,
 )
@@ -675,3 +676,137 @@ def test_a_reply_without_a_rows_key_is_an_empty_page(tmp_path: Path) -> None:
 
     assert page.rows == []
     assert not page.truncated
+
+
+def test_days_are_folded_back_into_one_row_per_key(tmp_path: Path) -> None:
+    """The caller asked for a range, so the answer has to describe the range.
+
+    Splitting the window into one request per day is an extraction strategy the
+    25,000-row limit forces, not a change to the question. Concatenating those
+    days left one row per key PER DAY, each carrying that day's numbers, in a
+    payload whose keys hold no date and whose envelope is labelled with the
+    whole window. A ranged request to Google returns one aggregated row instead,
+    and that is what has to come back here: clicks and impressions summed, CTR
+    recomputed over the totals, and position averaged by impressions -- which is
+    how Google averages it too, so the arithmetic matches the API rather than
+    approximating it.
+    """
+    days = [
+        {"keys": ["repeat"], "clicks": 1, "impressions": 100, "ctr": 0.01, "position": 10.0},
+        {"keys": ["repeat"], "clicks": 3, "impressions": 300, "ctr": 0.01, "position": 6.0},
+        {"keys": ["once"], "clicks": 5, "impressions": 50, "ctr": 0.1, "position": 2.0},
+    ]
+    service = FakeService([{"rows": [row]} for row in days])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        page = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 3),
+            dimensions=["query"],
+        )
+    finally:
+        engine.dispose()
+
+    by_query = {row.keys["query"]: row for row in page.rows}
+    assert len(page.rows) == 2, "the same query on two days is one row over the range"
+    assert by_query["repeat"].clicks == 4
+    assert by_query["repeat"].impressions == 400
+    assert by_query["repeat"].ctr == pytest.approx(4 / 400)
+    # 100 impressions at position 10 and 300 at position 6: the range average
+    # leans on the day that was seen more, exactly as Google's own does.
+    assert by_query["repeat"].position == pytest.approx(7.0)
+    assert by_query["once"].impressions == 50
+    assert [row.keys["query"] for row in page.rows] == ["once", "repeat"], (
+        "rows come back most-clicked first, the order a ranged request returns"
+    )
+
+
+def test_a_refused_refresh_token_is_an_authentication_error(tmp_path: Path) -> None:
+    """`execute()` refreshes the credentials before it sends anything.
+
+    A revoked or expired refresh token therefore fails before any HTTP reply
+    exists, as a `RefreshError` — not an `HttpError`, and no `GkaiError`. With
+    only `HttpError` caught, a property whose access had been withdrawn produced
+    a traceback and an empty stdout on a CLI that documents exit 1 as a verdict
+    which still prints an envelope.
+    """
+    from google.auth.exceptions import RefreshError
+
+    refused: BaseException = RefreshError(  # type: ignore[no-untyped-call]
+        "invalid_grant: Token has been expired or revoked."
+    )
+    service = FakeService([refused])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        with pytest.raises(AuthenticationError) as raised:
+            _query(
+                provider,
+                "sc-domain:example.com",
+                start_date=date(2026, 8, 1),
+                end_date=date(2026, 8, 1),
+                dimensions=["query"],
+            )
+    finally:
+        engine.dispose()
+
+    assert "credentials were refused" in raised.value.message
+
+
+def test_a_network_failure_is_reported_as_the_network(tmp_path: Path) -> None:
+    """A request that never reached Google is not a credentials problem.
+
+    The auth package reports transport failures too, so the two have to be told
+    apart: one says re-authorise, the other says try again.
+    """
+    from google.auth.exceptions import TransportError
+
+    unreachable: BaseException = TransportError(  # type: ignore[no-untyped-call]
+        "Failed to resolve 'www.googleapis.com'"
+    )
+    service = FakeService([unreachable])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        with pytest.raises(NetworkError) as raised:
+            _query(
+                provider,
+                "sc-domain:example.com",
+                start_date=date(2026, 8, 1),
+                end_date=date(2026, 8, 1),
+                dimensions=["query"],
+            )
+    finally:
+        engine.dispose()
+
+    assert "could not be reached" in raised.value.message
+
+
+def test_a_folded_group_with_no_impressions_keeps_a_usable_position(tmp_path: Path) -> None:
+    """A weighted mean needs weights, and zero impressions supply none.
+
+    Search Console can return a row with no impressions at all. Dividing by the
+    impression total there has no answer, and defaulting the position to zero
+    would put the query at rank one — the single most valuable position there
+    is — on the strength of no data whatsoever.
+    """
+    days = [
+        {"keys": ["ghost"], "clicks": 0, "impressions": 0, "ctr": 0.0, "position": 12.0},
+        {"keys": ["ghost"], "clicks": 0, "impressions": 0, "ctr": 0.0, "position": 18.0},
+    ]
+    service = FakeService([{"rows": [row]} for row in days])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        page = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 2),
+            dimensions=["query"],
+        )
+    finally:
+        engine.dispose()
+
+    assert len(page.rows) == 1
+    assert page.rows[0].ctr == 0.0
+    assert page.rows[0].position == pytest.approx(15.0), "the plain mean of the two positions"

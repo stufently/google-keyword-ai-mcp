@@ -135,7 +135,9 @@ def test_an_unavailable_trend_does_not_blame_the_length_of_the_timeline() -> Non
 
     A long timeline whose recent quarter Google could not measure also has no
     comparable trend, and telling the reader it was too short sends them
-    looking for a longer window that would not help.
+    looking for a longer window that would not help. There is a third way to
+    have no figure -- a previous quarter that measured nothing, so there is no
+    baseline to divide by -- and the message names whichever one applies.
     """
     blind = _trends([10] * 8)
     blind.timeline[-1].has_data = [False]
@@ -143,5 +145,50 @@ def test_an_unavailable_trend_does_not_blame_the_length_of_the_timeline() -> Non
 
     rendered = render_markdown(data, [], [])
 
-    assert "two fully measured quarters" in rendered
+    assert "a week Google could not measure" in rendered
     assert "fewer than eight" not in rendered
+
+
+def test_the_average_score_leaves_out_keywords_nothing_could_be_measured_for() -> None:
+    """A keyword with no measurable component scores 0.0 and means nothing by it.
+
+    Averaging those in turns "we could not measure this" into "this is worth
+    nothing", which the scoring guide expressly refuses — and it makes the
+    headline number fall as the run discovers more keywords, with nothing about
+    the niche having changed.
+    """
+    measured = ResearchKeyword(
+        keyword="alpha keyword tool",
+        normalized="alpha keyword tool",
+        discovered_from=["autocomplete"],
+        avg_monthly_searches=1000,
+    )
+    unmeasured = ResearchKeyword(
+        keyword="beta keyword tool",
+        normalized="beta keyword tool",
+        discovered_from=["autocomplete"],
+    )
+    settings = Settings()
+    scores = [score_keyword(measured, settings), score_keyword(unmeasured, settings)]
+    alone = score_keyword(measured, settings).score
+
+    rendered = render_markdown(research(keywords=[measured, unmeasured]), scores, [])
+
+    assert f"Average opportunity score: {alone:.2f}/100 across 1 keywords." in rendered
+    assert "1 of 2 keywords had no measurable component" in rendered
+
+
+def test_a_previous_quarter_of_zero_is_named_as_the_reason() -> None:
+    """Eight measured points and two whole quarters, and still no growth figure.
+
+    Dividing by a previous quarter that measured nothing has no answer, and
+    reporting that as a short or unmeasured timeline sends the reader looking
+    for data that is already there.
+    """
+    flat = _trends([0, 0, 0, 0, 0, 0, 5, 5])
+    data = research().model_copy(update={"trends": flat})
+
+    rendered = render_markdown(data, [], [])
+
+    assert "no baseline" in rendered
+    assert "could not measure" not in rendered

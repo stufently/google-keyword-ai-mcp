@@ -8,7 +8,7 @@ import respx
 
 from google_keyword_ai.cache import SqliteCache
 from google_keyword_ai.config import Settings
-from google_keyword_ai.errors import ApiError
+from google_keyword_ai.errors import ApiError, RateLimitError
 from google_keyword_ai.market import Market
 from google_keyword_ai.providers.autocomplete import (
     FALLBACK_ENDPOINT,
@@ -126,3 +126,40 @@ def test_second_identical_request_uses_cache_without_network(data_dir: Path) -> 
         assert route.call_count == 1
     finally:
         engine.dispose()
+
+
+@pytest.mark.anyio
+async def test_a_rate_limit_is_not_retried_against_the_other_host(tmp_path: Path) -> None:
+    """A second Google host is not an answer to "slow down".
+
+    The fallback exists for an endpoint that broke, not for one that refused on
+    purpose. Catching the rate limit with every other failure threw away the
+    message, the status and the advertised delay, and immediately issued another
+    request — so a throttled fan-out doubled its request count precisely while
+    Google was asking it to stop, and reported the run complete because the
+    second host happened to answer.
+    """
+    settings = Settings(data_dir=tmp_path, http_max_attempts=1)
+    engine = open_database(settings)
+    try:
+        async with httpx.AsyncClient() as client:
+            provider = AutocompleteProvider(
+                settings=settings,
+                client=client,
+                cache=SqliteCache(engine, settings),
+                rate_limiter=AsyncRateLimiter(1000),
+            )
+            with respx.mock(assert_all_called=False) as router:
+                primary = router.get(PRIMARY_ENDPOINT).mock(
+                    return_value=httpx.Response(429, headers={"Retry-After": "86400"})
+                )
+                fallback = router.get(FALLBACK_ENDPOINT).mock(
+                    return_value=httpx.Response(200, text='["seed",["seed one"]]')
+                )
+                with pytest.raises(RateLimitError):
+                    await provider.suggest("seed", Market.parse("en", "US"))
+    finally:
+        engine.dispose()
+
+    assert primary.call_count == 1
+    assert fallback.call_count == 0, "the fallback answered a refusal that was not about the host"

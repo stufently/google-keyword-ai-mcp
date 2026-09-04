@@ -124,11 +124,15 @@ def _run_trends(
             completeness_reason=warnings[0] if warnings else "no trend data",
         )
     if warnings:
+        # The first warning, not a fixed sentence about failure. Not every
+        # warning is a failure: a comparison splits related queries one per
+        # keyword, and reporting that as "one or more trend widgets failed"
+        # tells the caller something went wrong on a request where nothing did.
         return Envelope(
             data=data,
             warnings=warnings,
             completeness=Completeness.PARTIAL,
-            completeness_reason="one or more trend widgets failed",
+            completeness_reason=warnings[0],
         )
     return Envelope(data=data)
 

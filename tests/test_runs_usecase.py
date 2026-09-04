@@ -545,3 +545,46 @@ def test_listing_runs_reports_the_ones_it_could_not_read(tmp_path: Path) -> None
     assert [record.run_id for record in envelope.data] == [healthy.run_id]
     assert envelope.completeness is Completeness.PARTIAL
     assert damaged.run_id in (envelope.completeness_reason or "")
+
+
+def test_a_resume_that_succeeds_stops_calling_the_run_failed(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stored status has to describe the attempt that just ran.
+
+    `finish` reads the status back to learn whether the executor failed, and the
+    executor only ever writes `failed` — on success it writes nothing at all. So
+    a run that failed once was written back as failed however well the retry
+    went, with a complete result and no error attached to it, and no later
+    resume could undo that. Worse, `set_versions` was skipped along with it: the
+    record kept the old application version, so every subsequent resume found
+    its own fresh checkpoints stale, threw them away and spent the Google Ads
+    budget again.
+    """
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        record = _completed_record(settings)
+        record.app_version = "0.0.1-old"
+        store.create(record)
+        store.finish(record.run_id, status=RunStatus.FAILED, error="provider was down")
+    finally:
+        engine.dispose()
+
+    monkeypatch.setattr(runs_module, "_live_context", _fake_live_context)
+    envelope = run_resume(settings, record.run_id)
+
+    engine = open_database(settings)
+    try:
+        saved = RunStore(engine).get(record.run_id)
+    finally:
+        engine.dispose()
+
+    # The replay itself found nothing -- the point is that it RAN and did not
+    # fail, so neither the status nor the version may stay as the failure left
+    # them.
+    assert envelope.errors == []
+    assert saved is not None
+    assert saved.status is RunStatus.COMPLETED
+    assert saved.error is None
+    assert saved.app_version == __version__, "a successful retry has to refresh the version"

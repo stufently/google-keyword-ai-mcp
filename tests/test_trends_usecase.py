@@ -87,7 +87,7 @@ def test_partial_widget_result_has_warning(tmp_path: Path, monkeypatch: pytest.M
 
     assert envelope.completeness is Completeness.PARTIAL
     assert envelope.warnings == ["GEO_MAP: failed"]
-    assert envelope.completeness_reason == "one or more trend widgets failed"
+    assert envelope.completeness_reason == "GEO_MAP: failed"
     assert envelope.data.result.timeline
 
 
@@ -207,3 +207,31 @@ def test_kill_switch_disables_provider_and_returns_empty(tmp_path: Path) -> None
 
     assert envelope.completeness is Completeness.EMPTY
     assert envelope.errors == ["Google Trends is disabled by configuration."]
+
+
+def test_a_comparison_is_partial_without_claiming_a_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Not every warning is a failure, and the reason must not say it was one.
+
+    Google splits related queries one per keyword in a comparison. Related
+    queries really are missing from the payload, so `partial` is right — but a
+    fixed sentence about a failed widget tells the caller something went wrong
+    on a request where nothing did.
+    """
+    split = (
+        "RELATED_QUERIES came back once per keyword (RELATED_QUERIES_0, "
+        "RELATED_QUERIES_1); a comparison normalises each separately, so they "
+        "are not merged into one list and are not reported here."
+    )
+
+    async def comparison(*_args: object, **_kwargs: object) -> object:
+        return provider_info(), result_for(["one", "two"]), [split]
+
+    monkeypatch.setattr(trends_usecase, "_fetch_trends", comparison)
+
+    envelope = trends_usecase.run_trends_compare(Settings(data_dir=tmp_path), ["one", "two"])
+
+    assert envelope.completeness is Completeness.PARTIAL
+    assert envelope.completeness_reason == split
+    assert "failed" not in (envelope.completeness_reason or "")

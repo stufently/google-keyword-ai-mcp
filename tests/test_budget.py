@@ -97,3 +97,26 @@ def test_unknown_budget_kind_is_rejected() -> None:
 def test_nonpositive_budget_values_are_rejected(field: str) -> None:
     with pytest.raises(InvalidConfigurationError, match="positive"):
         Budget.model_validate({field: 0})
+
+
+def test_work_already_done_is_recorded_even_past_the_ceiling() -> None:
+    """The spend log is a record, not a second gate.
+
+    The fan-out and the keywords it found are counted after they are collected,
+    and `can_spend` refuses unconditionally once the runtime ceiling is past --
+    which, for a run the expander stopped on that very ceiling, is always. Asking
+    permission to write down work that already happened reported a cost of zero
+    for the runs whose cost a caller most wants to read.
+    """
+
+    async def exercise() -> None:
+        guard = BudgetGuard(Budget(max_runtime_seconds=0.001, max_autocomplete_queries=500))
+        await anyio.sleep(0.01)
+
+        assert guard.can_spend("autocomplete") is False, "the gate still refuses new work"
+        guard.spend("autocomplete", 47)
+
+        assert guard.spend.autocomplete_queries == 47
+        assert guard.exhausted_reason() == "max_runtime_seconds"
+
+    anyio.run(exercise)
