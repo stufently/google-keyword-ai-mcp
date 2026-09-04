@@ -21,25 +21,30 @@ The Search Analytics API accepts at most 25,000 rows in `rowLimit`. The provider
 therefore requests each day separately and pages within that day using
 `startRow`, then folds the days back into the range that was asked for: clicks
 and impressions add, CTR is recomputed over the totals rather than averaged, and
-position is averaged by impressions — which is how Google averages it over a
-range, so the result matches a single ranged request rather than approximating
-one. Rows come back most-clicked first.
+position is averaged by impressions — which is how Google defines those metrics,
+so the arithmetic follows the API rather than approximating it. What folding
+cannot recover is what the API never sent: it returns top rows, not all of them,
+and drops some data when `page` or `query` is among the dimensions. Rows come
+back most-clicked first, or oldest first when `date` is one of the dimensions,
+which is the order the API itself uses.
 
 About 50,000 rows per property, search type, and day is an upper bound on what
 the API exposes, not a guarantee that the response is complete.
-`search_console_daily_row_cap` takes its name from that figure but is spent once
-across the whole call, not afresh on each day of data: Google budgets extraction
-per property per calendar day of *requests*, so a counter that reset on every
-day of data would quietly spend that budget once per day of the window and still
-call the answer complete. A 28-day window therefore stops after the cap wherever
-it falls, and the days beyond it are never requested — the truncation reason
-names the day it stopped on. When the cap is reached *and rows remained to
-read*, `truncated` is `true`, `truncation_reason` explains which boundary was
-reached, and the envelope has `completeness` set to `partial`. Consumers must
-not treat such a result as a complete export.
+Google's wording is "a maximum of 50K rows of data **per day** per search type",
+so `search_console_daily_row_cap` is a fresh allowance for each day of data and
+not a budget for the whole call. Every day of the range is requested; a day that
+fills its allowance and still offers a full page stops there, and the days after
+it are read as normal. When any day is cut that way, `truncated` is `true`,
+`truncation_reason` names the days that hit the cap, and the envelope has
+`completeness` set to `partial`. Consumers must not treat such a result as a
+complete export.
+
+`dataState` accepts `all`, `final` and `hourly_all`, and Google reads an omitted
+value as `final`; anything else is refused here rather than sent, because the
+parameter decides whether fresh, not-yet-final rows are included.
 
 The cap bounds what is asked for, not only what is counted afterwards: each
-request asks for `min(row_limit, cap - rows_fetched)` rows. Checking the cap
+request asks for `min(row_limit, cap - rows_read_today)` rows. Checking the cap
 only after a full page arrived would spend up to `row_limit` rows past it —
 25,000 with the defaults — which would make a setting named "cap" no such
 thing. The price is that a request the cap shrinks cannot prove nothing

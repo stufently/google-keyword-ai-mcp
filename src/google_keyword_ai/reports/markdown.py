@@ -85,7 +85,11 @@ def render_markdown(
         lines.append("No keyword scores are available because no keywords were returned.")
 
     lines.extend(["", "## Top opportunities", ""])
-    ranked = sorted(scores, key=lambda score: (-score.score, score.keyword))[:10]
+    # Only keywords something could be measured for. A keyword with no
+    # component scores 0.0, and listing it among the top opportunities put a
+    # figure the same report calls unmeasured into the ranking that decides what
+    # to work on.
+    ranked = sorted(scored, key=lambda score: (-score.score, score.keyword))[:10]
     if ranked:
         lines.extend(["| Keyword | Score | Confidence |", "|---|---:|---|"])
         lines.extend(
@@ -130,7 +134,11 @@ def render_markdown(
         lines.extend(["| Keyword | Score |", "|---|---:|"])
         for keyword in long_tail:
             score = score_by_keyword.get(keyword.keyword)
-            rendered_score = "unavailable" if score is None else f"{score.score:.2f}"
+            rendered_score = (
+                "unavailable"
+                if score is None or not score.components_available
+                else f"{score.score:.2f}"
+            )
             lines.append(f"| {_cell(keyword.keyword)} | {rendered_score} |")
     else:
         lines.append("No long-tail opportunities were found among keywords of three or more words.")

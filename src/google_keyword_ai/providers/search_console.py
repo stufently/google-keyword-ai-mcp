@@ -97,6 +97,28 @@ def _is_auth_error(exc: BaseException) -> bool:
     return isinstance(exc, GoogleAuthError) and not isinstance(exc, TransportError)
 
 
+# Google accepts exactly these, case-insensitively, and treats an omitted value
+# as "final". The default here used to be "full", which is not one of them.
+_DATA_STATES = frozenset({"all", "final", "hourly_all"})
+_DEFAULT_DATA_STATE = "final"
+
+
+def _validate_data_state(value: str) -> str:
+    """Refuse a `dataState` the API does not define.
+
+    Sending an undefined value is not a local style question: the parameter
+    decides whether fresh, not-yet-final rows are included, so a value Google
+    does not recognise silently changes which data comes back -- or is rejected
+    outright, after the request has been throttled and sent.
+    """
+    if value.casefold() not in _DATA_STATES:
+        raise InvalidConfigurationError(
+            f"Search Console dataState must be one of {', '.join(sorted(_DATA_STATES))}, "
+            f"not {value!r}."
+        )
+    return value
+
+
 def _as_date(value: date | str, field_name: str) -> date:
     if isinstance(value, date):
         return value
@@ -377,7 +399,7 @@ class SearchConsoleProvider(Provider):
         dimensions: Sequence[str],
         market: Market | None = None,
         search_type: str = "web",
-        data_state: str = "full",
+        data_state: str = _DEFAULT_DATA_STATE,
         row_limit: int | None = None,
         dimension_filters: Sequence[dict[str, str]] | None = None,
     ) -> SearchAnalyticsPage:
@@ -407,7 +429,7 @@ class SearchConsoleProvider(Provider):
             dimensions=requested_dimensions,
             market=market,
             search_type=search_type,
-            data_state=data_state,
+            data_state=_validate_data_state(data_state),
             row_limit=page_size,
             dimension_filters=filters,
         )
@@ -421,21 +443,23 @@ class SearchConsoleProvider(Provider):
         truncated = False
         truncation_reason: str | None = None
         current_day = start
-        # The cap counts rows pulled by THIS call, not rows per day of data:
-        # Google budgets extraction per property per calendar day of requests, so
-        # a 28-day window that reset the counter every day would quietly spend
-        # 28 budgets and still report a complete answer.
-        rows_fetched = 0
+        capped_days: list[date] = []
+        cap = self._settings.search_console_daily_row_cap
         while current_day <= end:
             start_row = 0
+            # Google's own limit is "a maximum of 50K rows of data per day per
+            # search type", so the allowance belongs to each day of DATA and is
+            # reset here. Counted once across the whole call instead, a property
+            # busier than the cap stopped the range partway through and never
+            # asked for the days beyond it -- days Google would have served in
+            # full.
+            rows_today = 0
             while True:
-                # Never ask for more than the cap still allows. Asking for a
-                # whole page and checking afterwards lets one page overshoot by
-                # up to `page_size` rows -- 25,000 with the defaults -- which
-                # makes a setting named "cap" no such thing.
-                requested_rows = min(
-                    page_size, self._settings.search_console_daily_row_cap - rows_fetched
-                )
+                # Never ask for more than the day's remaining allowance. Asking
+                # for a whole page and checking afterwards lets one page
+                # overshoot by up to `page_size` rows -- 25,000 with the
+                # defaults -- which makes a setting named "cap" no such thing.
+                requested_rows = min(page_size, cap - rows_today)
                 body: dict[str, Any] = {
                     "startDate": current_day.isoformat(),
                     "endDate": current_day.isoformat(),
@@ -456,33 +480,39 @@ class SearchConsoleProvider(Provider):
                     raise _translate_http_error(exc) from exc
                 page_rows = self._parse_rows(response, requested_dimensions)
                 all_rows.extend(page_rows)
-                rows_fetched += len(page_rows)
-                # A full page means another may follow; a short one ends the day.
-                more_to_read = len(page_rows) == requested_rows or current_day < end
-                # Spending the whole cap is only a truncation if it stopped work
-                # that remained. A range whose last row happens to land exactly
-                # on the cap was read in full, and calling that incomplete
-                # sends the caller looking for data that does not exist.
-                if rows_fetched >= self._settings.search_console_daily_row_cap and more_to_read:
-                    truncated = True
-                    truncation_reason = (
-                        "Search Console row cap of "
-                        f"{self._settings.search_console_daily_row_cap} reached while reading "
-                        f"{start.isoformat()}..{end.isoformat()} (stopped at "
-                        f"{current_day.isoformat()}); rows may be missing. The cap bounds what "
-                        "is extracted, so a request it shrinks cannot confirm that nothing "
-                        "remained."
-                    )
+                rows_today += len(page_rows)
+                # A full page means another may follow for this day; a short one
+                # proves the day held nothing more.
+                more_to_read = len(page_rows) == requested_rows
+                # Spending the whole allowance is only a truncation if it
+                # stopped work that remained. A day whose last row happens to
+                # land exactly on the cap was read in full, and calling that
+                # incomplete sends the caller looking for data that does not
+                # exist.
+                if rows_today >= cap and more_to_read:
+                    capped_days.append(current_day)
                     break
-                if len(page_rows) < requested_rows:
+                if not more_to_read:
                     break
                 start_row += requested_rows
-            if truncated:
-                break
+            # One busy day does not end the range: every other day has its own
+            # allowance, and abandoning them left the answer short of days the
+            # caller asked for and Google would have served.
             current_day += timedelta(days=1)
 
+        if capped_days:
+            truncated = True
+            truncation_reason = (
+                f"Search Console row cap of {cap} was reached on "
+                f"{len(capped_days)} of the requested days "
+                f"({', '.join(day.isoformat() for day in capped_days[:5])}"
+                f"{'...' if len(capped_days) > 5 else ''}); rows from those days may be "
+                "missing. The cap bounds what is extracted, so a day it shrinks cannot "
+                "confirm that nothing remained."
+            )
+
         result = SearchAnalyticsPage(
-            rows=_fold_days(all_rows),
+            rows=_fold_days(all_rows, requested_dimensions),
             truncated=truncated,
             truncation_reason=truncation_reason,
         )
@@ -490,7 +520,9 @@ class SearchConsoleProvider(Provider):
         return result
 
 
-def _fold_days(rows: Sequence[SearchAnalyticsRow]) -> list[SearchAnalyticsRow]:
+def _fold_days(
+    rows: Sequence[SearchAnalyticsRow], dimensions: Sequence[str]
+) -> list[SearchAnalyticsRow]:
     """Fold the per-day requests back into the range the caller asked for.
 
     Splitting the window into one request per day is forced by the 25,000-row
@@ -537,9 +569,15 @@ def _fold_days(rows: Sequence[SearchAnalyticsRow]) -> list[SearchAnalyticsRow]:
                 position=position,
             )
         )
-    # Most-clicked first, the order a ranged request comes back in. The days
-    # arrived in date order, so concatenation left the ordering meaningless.
-    merged.sort(key=lambda row: (-row.clicks, -row.impressions, row.position))
+    # Google's own rule: "Results are sorted by click count, in descending
+    # order, unless you group by date, in which case results are sorted by date,
+    # in ascending order." Sorting a date-grouped answer by clicks would scramble
+    # the chronology, and a `--limit` on top of it would then return the wrong
+    # days rather than the first ones.
+    if "date" in dimensions:
+        merged.sort(key=lambda row: row.keys.get("date", ""))
+    else:
+        merged.sort(key=lambda row: (-row.clicks, -row.impressions, row.position))
     return merged
 
 

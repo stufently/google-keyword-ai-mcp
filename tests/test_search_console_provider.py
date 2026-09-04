@@ -122,6 +122,7 @@ def _query(
     row_limit: int | None = None,
     market: Market | None = None,
     search_type: str = "web",
+    data_state: str = "final",
 ) -> SearchAnalyticsPage:
     return anyio.run(
         partial(
@@ -133,6 +134,7 @@ def _query(
             row_limit=row_limit,
             market=market,
             search_type=search_type,
+            data_state=data_state,
         )
     )
 
@@ -252,7 +254,12 @@ def test_paging_rejects_row_limit_above_api_maximum(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_truncation_is_explicit_at_daily_cap_and_stops_fetching(tmp_path: Path) -> None:
+def test_truncation_is_explicit_at_the_cap_and_stops_reading_that_day(tmp_path: Path) -> None:
+    """A day that fills its whole allowance and still offers a full page is cut.
+
+    Reading stops for that day — there is no point paging past an allowance that
+    is already spent — and the answer says so.
+    """
     first = _row()
     first["keys"] = ["one"]
     second = _row()
@@ -265,7 +272,7 @@ def test_truncation_is_explicit_at_daily_cap_and_stops_fetching(tmp_path: Path) 
             provider,
             "sc-domain:example.com",
             start_date=date(2026, 8, 1),
-            end_date=date(2026, 8, 2),
+            end_date=date(2026, 8, 1),
             dimensions=["query"],
             row_limit=2,
         )
@@ -278,20 +285,32 @@ def test_truncation_is_explicit_at_daily_cap_and_stops_fetching(tmp_path: Path) 
     assert len(service.calls) == 1
 
 
-def test_truncation_cap_counts_across_days_not_per_day(tmp_path: Path) -> None:
-    """The cap is a budget for the whole call, not a fresh allowance each day.
+def test_the_cap_is_a_fresh_allowance_for_each_day_of_data(tmp_path: Path) -> None:
+    """Google's limit belongs to the day, not to the call.
 
-    Google budgets extraction per property per calendar day of requests. A
-    counter that resets on every day of DATA would let a 28-day window spend
-    that budget 28 times over and still call the answer complete. Two days that
-    return one row each must trip a cap of two.
+    Its wording is "a maximum of 50K rows of data per day per search type". A
+    counter spent once across the whole call stopped a busy property's range
+    partway through and never asked for the days beyond it — days the API would
+    have served in full. One day reaching the cap marks the answer truncated and
+    names that day; the rest of the range is still read.
     """
-    first = _row()
-    first["keys"] = ["day-one"]
-    second = _row()
-    second["keys"] = ["day-two"]
-    service = FakeService([{"rows": [first]}, {"rows": [second]}, {"rows": []}])
-    settings = _settings(tmp_path, search_console_daily_row_cap=2)
+
+    def day(name: str, clicks: int) -> dict[str, object]:
+        row = _row()
+        row["keys"] = [name]
+        row["clicks"] = clicks
+        return row
+
+    # Day one fills its allowance of one and still offers a full page; days two
+    # and three answer with a single short page each.
+    service = FakeService(
+        [
+            {"rows": [day("busy-day", 9)]},
+            {"rows": [day("quiet-day", 5)]},
+            {"rows": [day("last-day", 1)]},
+        ]
+    )
+    settings = _settings(tmp_path, search_console_daily_row_cap=1)
     provider, engine = _provider(settings, service)
     try:
         result = _query(
@@ -306,9 +325,11 @@ def test_truncation_cap_counts_across_days_not_per_day(tmp_path: Path) -> None:
         engine.dispose()
 
     assert result.truncated is True
-    assert [row.keys["query"] for row in result.rows] == ["day-one", "day-two"]
-    # Day three is never requested: the budget ran out on day two.
-    assert len(service.calls) == 2
+    assert result.truncation_reason is not None
+    assert "2026-08-01" in result.truncation_reason
+    # Every day of the range was asked for, not just the ones before the busy one.
+    assert len(service.calls) == 3
+    assert [row.keys["query"] for row in result.rows] == ["busy-day", "quiet-day", "last-day"]
 
 
 def test_a_day_that_ends_before_the_cap_is_complete(tmp_path: Path) -> None:
@@ -810,3 +831,83 @@ def test_a_folded_group_with_no_impressions_keeps_a_usable_position(tmp_path: Pa
     assert len(page.rows) == 1
     assert page.rows[0].ctr == 0.0
     assert page.rows[0].position == pytest.approx(15.0), "the plain mean of the two positions"
+
+
+def test_a_date_grouped_answer_comes_back_in_date_order(tmp_path: Path) -> None:
+    """Google: sorted by clicks descending, unless grouped by date — then by date ascending.
+
+    Folding the days back together and then sorting everything by clicks
+    scrambled a chronology, and a `--limit` on top of that returned the busiest
+    days rather than the first ones.
+    """
+    days = [
+        {"keys": ["2026-08-01"], "clicks": 1, "impressions": 10, "ctr": 0.1, "position": 5.0},
+        {"keys": ["2026-08-02"], "clicks": 9, "impressions": 90, "ctr": 0.1, "position": 5.0},
+        {"keys": ["2026-08-03"], "clicks": 5, "impressions": 50, "ctr": 0.1, "position": 5.0},
+    ]
+    service = FakeService([{"rows": [row]} for row in days])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        page = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 3),
+            dimensions=["date"],
+        )
+    finally:
+        engine.dispose()
+
+    assert [row.keys["date"] for row in page.rows] == ["2026-08-01", "2026-08-02", "2026-08-03"]
+
+
+@pytest.mark.parametrize("value", ["full", "FINALIZED", ""])
+def test_an_undefined_data_state_is_refused(tmp_path: Path, value: str) -> None:
+    """`dataState` decides whether fresh, not-yet-final rows come back.
+
+    Google defines `all`, `final` and `hourly_all`, and treats the parameter as
+    `final` when it is omitted. The default here was `full`, which is none of
+    them: a value the API does not recognise silently changes which data
+    arrives, or is rejected after the request has been throttled and sent.
+    """
+    provider, engine = _provider(_settings(tmp_path), FakeService())
+    try:
+        with pytest.raises(InvalidConfigurationError) as raised:
+            _query(
+                provider,
+                "sc-domain:example.com",
+                start_date=date(2026, 8, 1),
+                end_date=date(2026, 8, 1),
+                dimensions=["query"],
+                data_state=value,
+            )
+    finally:
+        engine.dispose()
+
+    assert "dataState must be one of" in raised.value.message
+
+
+def test_the_default_data_state_is_one_google_defines(tmp_path: Path) -> None:
+    """Nothing else pins the default, and the default was the wrong value.
+
+    `full` is not among `all`, `final` and `hourly_all`, so every live query
+    made by every caller that did not pass the argument carried a value the API
+    does not define.
+    """
+    service = FakeService([{"rows": []}])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        anyio.run(
+            partial(
+                provider.query,
+                "sc-domain:example.com",
+                start_date=date(2026, 8, 1),
+                end_date=date(2026, 8, 1),
+                dimensions=["query"],
+            )
+        )
+    finally:
+        engine.dispose()
+
+    _site, body = service.calls[0]
+    assert body["dataState"] == "final"

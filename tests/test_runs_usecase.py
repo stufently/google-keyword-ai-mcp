@@ -588,3 +588,39 @@ def test_a_resume_that_succeeds_stops_calling_the_run_failed(
     assert saved.status is RunStatus.COMPLETED
     assert saved.error is None
     assert saved.app_version == __version__, "a successful retry has to refresh the version"
+
+
+def test_a_replay_that_collected_everything_is_not_partial(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale checkpoints are a note about method, not about missing data.
+
+    A resume under a new application version discards every checkpoint and runs
+    the scenario again. When that replay collects everything, the answer is
+    whole — but the note explaining why it replayed counted as a warning, and
+    every warning downgraded the envelope, so a completely successful resume
+    reported `partial` and exited 1.
+    """
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        record = _completed_record(settings)
+        record.app_version = "0.0.1-old"
+        store.create(record)
+    finally:
+        engine.dispose()
+
+    class CollectingScenario:
+        async def run(self, context: ScenarioContext) -> ResearchData:
+            del context
+            return _data()
+
+    monkeypatch.setattr(runs_module, "_live_context", _fake_live_context)
+    monkeypatch.setattr(runs_module, "_scenario_for_name", lambda *_args: CollectingScenario())
+    envelope = run_resume(settings, record.run_id)
+
+    assert envelope.data is not None and envelope.data.keywords
+    assert envelope.completeness is Completeness.COMPLETE
+    assert any("stale" in warning for warning in envelope.warnings), (
+        "the note still reaches the caller, it just does not vote on completeness"
+    )

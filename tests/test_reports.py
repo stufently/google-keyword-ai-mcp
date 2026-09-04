@@ -228,3 +228,33 @@ def test_the_summary_counts_only_the_clusters_that_formed() -> None:
 
     assert "Analyzed 3 keywords in 1 clusters." in rendered
     assert "1 keywords joined no cluster." in rendered
+
+
+def test_an_unmeasured_keyword_is_not_ranked_as_a_top_opportunity() -> None:
+    """The same report cannot call a score unmeasured and then rank it.
+
+    A keyword with no component scores 0.0, and listing it among the top
+    opportunities put a figure the report itself excludes from its average into
+    the ranking that decides what to work on — shown as a confident `0.00`.
+    """
+    measured = ResearchKeyword(
+        keyword="alpha keyword tool",
+        normalized="alpha keyword tool",
+        discovered_from=["autocomplete"],
+        avg_monthly_searches=1000,
+    )
+    unmeasured = ResearchKeyword(
+        keyword="beta keyword tool for sale",
+        normalized="beta keyword tool for sale",
+        discovered_from=["autocomplete"],
+    )
+    settings = Settings()
+    scores = [score_keyword(measured, settings), score_keyword(unmeasured, settings)]
+
+    rendered = render_markdown(research(keywords=[measured, unmeasured]), scores, [])
+
+    top = rendered.split("## Top opportunities")[1].split("##")[0]
+    assert "alpha keyword tool" in top
+    assert "beta keyword tool for sale" not in top
+    long_tail = rendered.split("## Long-tail opportunities")[1].split("##")[0]
+    assert "| beta keyword tool for sale | unavailable |" in long_tail

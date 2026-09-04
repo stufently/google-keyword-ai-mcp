@@ -274,7 +274,10 @@ def test_app_version_or_parser_version_change_restarts(
         )
         assert scenario.calls == 1
         expected_reason = "Application version" if field == "app_version" else "Parser version"
-        assert any(expected_reason in warning for warning in context.warnings)
+        # A notice, not a warning: the checkpoints were stale and the scenario
+        # ran again, which says nothing about what came back.
+        assert any(expected_reason in notice for notice in context.notices)
+        assert context.warnings == []
     finally:
         engine.dispose()
 
@@ -445,7 +448,7 @@ def test_discarded_checkpoints_say_the_request_changed(tmp_path: Path) -> None:
             )
         )
 
-        assert context.warnings == [
+        assert context.notices == [
             "The request changed since this run was saved, so its checkpoints "
             "for first were discarded and the scenario ran again."
         ]

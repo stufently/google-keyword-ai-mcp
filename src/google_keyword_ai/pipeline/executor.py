@@ -197,7 +197,7 @@ class RunExecutor:
                 "all stage checkpoints are stale."
             )
         if resume and version_reason is not None:
-            context.warnings.append(version_reason)
+            context.notices.append(version_reason)
 
         saved_by_name = {stage.name: stage for stage in record.stages}
         runnable: list[tuple[Stage, StageRecord]] = []
@@ -251,7 +251,7 @@ class RunExecutor:
             )
 
         if discarded:
-            context.warnings.append(
+            context.notices.append(
                 "The request changed since this run was saved, so its checkpoints for "
                 f"{', '.join(discarded)} were discarded and the scenario ran again."
             )

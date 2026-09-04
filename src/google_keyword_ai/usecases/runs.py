@@ -161,6 +161,7 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
                 data,
                 warnings,
                 errors,
+                notices=list(context.notices),
                 run_id=current.run_id,
             )
             refreshed = store.get(current.run_id)

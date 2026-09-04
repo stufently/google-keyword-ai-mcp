@@ -20,6 +20,11 @@ Every command prints its envelope to stdout and then exits according to
 
 Never report exit 1 as a failed run without parsing the envelope first.
 
+`gkai trends compare` exits 1 on every healthy run. Google splits related
+queries one per keyword in a comparison, so that list is genuinely absent from
+the payload and the envelope is `partial` — report the comparison it did return,
+not a failure.
+
 `gkai research --format markdown` is the one command that does not print an
 envelope on stdout: it prints the report there instead, and on a `partial` or
 `empty` run writes `completeness`, `completeness_reason`, `warnings` and

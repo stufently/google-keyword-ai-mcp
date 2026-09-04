@@ -107,6 +107,12 @@ class ScenarioContext:
     expander: ExpanderLike | None = None
     availability: dict[str, bool] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
+    # Notes about HOW the answer was produced, not about anything missing from
+    # it: a resume that found its checkpoints stale and ran the scenario again
+    # is worth saying, and says nothing about the completeness of what came
+    # back. Kept apart from `warnings` because every warning downgrades the
+    # envelope, and a successful replay was being reported as `partial`.
+    notices: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     def available(self, name: str) -> bool:

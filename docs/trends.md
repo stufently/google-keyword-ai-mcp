@@ -57,6 +57,14 @@ mean nothing -- and the reply says so in a warning rather than reporting no
 related queries at all. `tests/fixtures/trends/explore_compare.json` is the live
 capture this is read from.
 
+A comparison is therefore reported as `partial` every time, and `gkai trends
+compare` exits 1 with it: related queries really are absent from the payload,
+and `partial` is what this project calls usable data that is missing. That is
+the expected outcome of a healthy comparison, not a failure — the envelope on
+stdout is valid, and `completeness_reason` names the split rather than claiming
+a widget failed. A single-keyword `gkai trends` is unaffected: there the widget
+comes back under its plain name and the answer is complete.
+
 `normalization_scope` is the first 16 characters of the SHA-256 of canonical
 JSON containing the keywords, country, timeframe and language. Identical
 parameters produce an identical scope, different parameters a different one.

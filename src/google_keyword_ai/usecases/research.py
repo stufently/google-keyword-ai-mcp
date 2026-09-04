@@ -210,8 +210,18 @@ def _envelope_for_research(
     warnings: list[str],
     errors: list[str],
     *,
+    notices: list[str] | None = None,
     run_id: str | None = None,
 ) -> Envelope[ResearchData]:
+    """Judge the answer, then say everything that was worth saying about it.
+
+    Notices describe how the answer was produced -- a resume whose checkpoints
+    had gone stale, so the scenario ran again -- and nothing about them makes an
+    answer less complete. They travel in `warnings` so the caller still reads
+    them, but after the real ones and without a vote on `completeness`: counted
+    in, a replay that collected everything reported `partial`.
+    """
+    reported = list(warnings) + list(notices or [])
     # `data.trends is not None` was a presence check on the container: Trends is
     # fetched with the seed even when the run found no keywords, and a request
     # whose widgets all failed still comes back as a result object, empty. That
@@ -241,7 +251,7 @@ def _envelope_for_research(
             reason = "no research data"
         return Envelope(
             data=data,
-            warnings=warnings,
+            warnings=reported,
             errors=errors,
             completeness=Completeness.EMPTY,
             completeness_reason=reason,
@@ -257,13 +267,13 @@ def _envelope_for_research(
         )
         return Envelope(
             data=data,
-            warnings=warnings,
+            warnings=reported,
             errors=errors,
             completeness=Completeness.PARTIAL,
             completeness_reason=reason,
             run_id=run_id,
         )
-    return Envelope(data=data, run_id=run_id)
+    return Envelope(data=data, warnings=reported, run_id=run_id)
 
 
 async def _execute_saved(
@@ -358,6 +368,7 @@ async def _execute_saved(
                 data,
                 context.warnings,
                 context.errors,
+                notices=context.notices,
                 run_id=record.run_id,
             )
             refreshed = store.get(record.run_id)
