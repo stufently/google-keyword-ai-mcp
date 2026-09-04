@@ -236,6 +236,29 @@ def _sort_keywords(keywords: list[ResearchKeyword]) -> bool:
     return bool(keywords)
 
 
+def _note_expansion(context: ScenarioContext, expansion: ExpansionStats, found: bool) -> None:
+    """Say what the fan-out did, at the moment it did it.
+
+    Both of these used to be reported out of order: the failure count was
+    appended during the final assembly, after every later source had already
+    warned. An empty envelope names its first warning as the cause on the
+    understanding that warnings accumulate as the run proceeds, so a warning
+    about the very first step arriving last made a failing Autocomplete read as
+    an absent Google Ads -- and made a fan-out that partly failed read as one
+    that succeeded and found nothing.
+    """
+    if expansion.queries_failed:
+        # Skipping a dead request keeps the fan-out alive, but the keywords it
+        # would have found are simply absent. Without this the result reads as
+        # a small niche rather than a source that was failing.
+        context.warnings.append(
+            f"{expansion.queries_failed} of {expansion.queries_executed} Autocomplete requests "
+            "failed and were skipped; the keywords they would have returned are missing."
+        )
+    if not found:
+        context.warnings.append("Autocomplete returned no usable keywords for this seed.")
+
+
 async def _fetch_trends(
     context: ScenarioContext, keyword: str | None, used: set[str]
 ) -> TrendsResult | None:
@@ -327,14 +350,6 @@ def _research_data(
     stopped_by = context.budget_guard.exhausted_reason()
     if expansion is not None and expansion.stopped_by is not None:
         stopped_by = _EXPANSION_STOP_TO_BUDGET.get(expansion.stopped_by, stopped_by)
-    if expansion is not None and expansion.queries_failed:
-        # Skipping a dead request keeps the fan-out alive, but the keywords it
-        # would have found are simply absent. Without this the result reads as
-        # a small niche rather than a source that was failing.
-        context.warnings.append(
-            f"{expansion.queries_failed} of {expansion.queries_executed} Autocomplete requests "
-            "failed and were skipped; the keywords they would have returned are missing."
-        )
     return ResearchData(
         scenario=scenario,
         input=input_value,
@@ -400,13 +415,8 @@ class NewNicheResearch:
         )
         if filtered:
             context.budget_guard.spend("keywords", len(filtered))
-        elif expansion is not None:
-            # The fan-out ran and left nothing usable behind: every suggestion
-            # was the seed itself, a single character, or there were none. Said
-            # plainly here, because otherwise the empty run is explained by the
-            # next warning to come along -- normally an absent Google Ads, which
-            # had nothing to do with it.
-            context.warnings.append("Autocomplete returned no usable keywords for this seed.")
+        if expansion is not None:
+            _note_expansion(context, expansion, found=bool(filtered))
         keywords = [
             ResearchKeyword(
                 keyword=candidate.raw,
@@ -561,6 +571,7 @@ class CompetitorResearch:
                                 context.budget_guard.budget.max_autocomplete_queries,
                             ),
                         )
+                    _note_expansion(context, expansion, found=bool(keywords))
         notable = (
             max(keywords, key=lambda keyword: keyword.avg_monthly_searches or 0).keyword
             if keywords

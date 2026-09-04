@@ -28,6 +28,10 @@ from google_keyword_ai.pipeline.scenarios import (
     _quality,
 )
 from google_keyword_ai.providers.search_console import SiteProperty
+from google_keyword_ai.providers.trends.models import (
+    TrendsResult,
+    build_normalization_scope,
+)
 from google_keyword_ai.usecases import research as research_module
 from google_keyword_ai.usecases.research import (
     _envelope_for_research,
@@ -270,3 +274,30 @@ def test_the_first_warning_is_the_reason_in_both_branches(settings: Settings) ->
     assert empty.completeness is Completeness.EMPTY
     assert partial.completeness is Completeness.PARTIAL
     assert empty.completeness_reason == partial.completeness_reason == "first cause"
+
+
+def test_a_trends_object_holding_nothing_is_not_data(settings: Settings) -> None:
+    """A container is not its contents.
+
+    Trends is fetched with the seed even when the run found no keywords, and a
+    request whose widgets all failed still comes back as a `TrendsResult` --
+    an empty one. Testing the object for existence rather than for rows made
+    that outage count as data, and a run with nothing in it at all reported
+    `partial`, which promises the caller usable data it does not have.
+    """
+    data = _data(settings, with_keyword=False)
+    data.trends = TrendsResult(
+        keywords=["topic"],
+        geo="US",
+        timeframe="today 12-m",
+        normalization_scope=build_normalization_scope(
+            ["topic"], geo="US", timeframe="today 12-m", hl="en"
+        ),
+        retrieved_at=datetime.now(UTC),
+        source="https://trends.google.com/trends/api/explore",
+    )
+
+    envelope = _envelope_for_research(data, ["TIMESERIES: rate limited"], [])
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == "TIMESERIES: rate limited"

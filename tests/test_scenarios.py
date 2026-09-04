@@ -674,3 +674,46 @@ def test_a_run_out_of_time_does_not_start_the_clock_again(settings: Settings) ->
         assert not any("budget was spent" in warning for warning in context.warnings)
 
     anyio.run(exercise)
+
+
+def test_a_fallback_that_found_nothing_says_so_too(settings: Settings) -> None:
+    """The competitor fallback is a fan-out like any other and reports like one.
+
+    Autocomplete ran because Google Ads was gone, and it came back with nothing
+    usable. Silent, the empty run is explained by the missing Ads — which is
+    true about Ads and wrong about why there are no keywords.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        context = _context(settings, log=log, expander=FakeExpander(log, []))
+        data = await CompetitorResearch("example.com", seed_keyword="seed").run(context)
+
+        assert "autocomplete" in log, "the fallback has to have run for this to mean anything"
+        assert data.keywords == []
+        assert any("no usable keywords" in w for w in context.warnings), context.warnings
+
+    anyio.run(exercise)
+
+
+def test_a_failing_fan_out_is_not_a_fan_out_that_found_nothing(settings: Settings) -> None:
+    """Warnings have to arrive in the order the events did.
+
+    An empty envelope names its first warning as the cause, on the understanding
+    that warnings accumulate as the run proceeds. The failure count used to be
+    appended during the final assembly — after every later source had already
+    warned — so a fan-out where two requests in three died reported that it had
+    simply found nothing, which asserts the opposite of what happened.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        expander = FakeExpander(log, [], queries_failed=2)
+        context = _context(settings, log=log, expander=expander)
+        data = await NewNicheResearch("seed").run(context)
+
+        assert data.keywords == []
+        assert "failed and were skipped" in context.warnings[0], context.warnings
+        assert any("no usable keywords" in w for w in context.warnings)
+
+    anyio.run(exercise)

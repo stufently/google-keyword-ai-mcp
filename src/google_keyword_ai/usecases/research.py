@@ -212,7 +212,15 @@ def _envelope_for_research(
     *,
     run_id: str | None = None,
 ) -> Envelope[ResearchData]:
-    has_data = bool(data.keywords or data.trends is not None or data.opportunities)
+    # `data.trends is not None` was a presence check on the container: Trends is
+    # fetched with the seed even when the run found no keywords, and a request
+    # whose widgets all failed still comes back as a result object, empty. That
+    # counted as data, so a run holding nothing at all reported `partial`.
+    has_data = bool(
+        data.keywords
+        or data.opportunities
+        or (data.trends is not None and data.trends.carries_data())
+    )
     if not has_data:
         # A run the budget cut short before it gathered anything would otherwise
         # report the flat "no research data", which reads as a measured verdict

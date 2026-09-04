@@ -42,6 +42,18 @@ class TrendsResult(BaseModel):
     retrieved_at: datetime
     source: str
 
+    def carries_data(self) -> bool:
+        """Say whether the reply holds any of the three things Trends returns.
+
+        A result exists whatever happened: a request whose widgets all failed
+        comes back as one of these, empty. Callers that tested the object for
+        existence counted that outage as data, so the question belongs here,
+        asked once, rather than being re-derived at each layer -- and the
+        timeline alone cannot answer it either, because Google returns regions
+        and related queries for keywords whose timeline is empty.
+        """
+        return bool(self.timeline or self.geo_interest or self.related.top or self.related.rising)
+
 
 def build_normalization_scope(keywords: list[str], *, geo: str, timeframe: str, hl: str) -> str:
     canonical = json.dumps(
