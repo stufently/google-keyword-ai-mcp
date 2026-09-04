@@ -54,3 +54,13 @@ again, leaving the original record untouched.
 
 The configuration snapshot is produced by the regular settings masking. Token
 values, client secrets and refresh tokens are never written to the database.
+
+## Reading runs back
+
+A run whose stored row cannot be parsed is refused by name: the four JSON
+columns and two enumerations are read back without conversion, so a damaged one
+would otherwise escape as a crash. `run show` reports it as an empty envelope
+naming the `run_id` — which is what a caller needs in order to delete it — while
+`run list` keeps going: the runs it can read come back, the ones it cannot are
+named beside them, and the envelope is `partial`. One damaged row must not hide
+the history that contains the id to remove.

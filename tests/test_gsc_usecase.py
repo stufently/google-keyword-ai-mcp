@@ -5,7 +5,7 @@ import pytest
 
 from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness
-from google_keyword_ai.errors import AuthenticationError
+from google_keyword_ai.errors import AuthenticationError, InvalidConfigurationError
 from google_keyword_ai.providers.search_console import (
     SearchAnalyticsPage,
     SearchAnalyticsRow,
@@ -227,3 +227,31 @@ def test_rows_that_met_no_threshold_are_not_reported_as_missing_data(
     reason = result.completeness_reason or ""
     assert "no search analytics data" not in reason
     assert "threshold" in reason, reason
+
+
+@pytest.mark.parametrize(
+    ("days", "country"),
+    [
+        pytest.param(0, None, id="unusable_window"),
+        pytest.param(28, "XX", id="unknown_country"),
+    ],
+)
+def test_a_refused_request_carries_no_payload(
+    tmp_path: Path, days: int, country: str | None
+) -> None:
+    """One refusal, one shape. The contract says a refusal carries `data: null`.
+
+    A non-positive limit already refused that way, while an unusable date range
+    or an unknown country came back with a full payload whose window had been
+    invented — `start_date` and `end_date` as empty strings, presented as a
+    result. Both facades then had two shapes to parse for one outcome.
+    """
+    with pytest.raises(InvalidConfigurationError):
+        gsc.run_gsc_opportunities(
+            _settings(tmp_path), "sc-domain:example.com", days=days, country=country
+        )
+
+    with pytest.raises(InvalidConfigurationError):
+        gsc.run_gsc_queries(
+            _settings(tmp_path), "sc-domain:example.com", days=days, country=country
+        )

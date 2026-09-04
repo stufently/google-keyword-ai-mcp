@@ -466,7 +466,7 @@ class SearchConsoleProvider(Provider):
                 if rows_fetched >= self._settings.search_console_daily_row_cap and more_to_read:
                     truncated = True
                     truncation_reason = (
-                        "Search Console daily row cap of "
+                        "Search Console row cap of "
                         f"{self._settings.search_console_daily_row_cap} reached while reading "
                         f"{start.isoformat()}..{end.isoformat()} (stopped at "
                         f"{current_day.isoformat()}); rows may be missing. The cap bounds what "

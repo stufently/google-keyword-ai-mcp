@@ -20,6 +20,7 @@ from google_keyword_ai.providers.trends.unofficial import (
     WIDGET_PATHS,
     WIDGETDATA_URL,
     UnofficialTrendsClient,
+    parse_timeline,
     strip_prefix,
 )
 from google_keyword_ai.ratelimit import AsyncRateLimiter
@@ -640,3 +641,17 @@ async def test_a_comparison_says_that_related_queries_came_per_keyword() -> None
     # not an outage: the breaker must not count it and the cache may keep it.
     assert widgetdata.call_count == 4
     assert not trends.all_widgets_failed()
+
+
+def test_the_golden_timeline_marks_its_unfinished_week() -> None:
+    """The live capture ends mid-week, and the parser has to carry that through.
+
+    `multiline_popular.json` was taken on a Wednesday: its last point covers
+    30 August to 5 September and holds three days of seven. Dropped at parse
+    time, that fragment is averaged into the latest quarter as a whole week.
+    """
+    timeline = parse_timeline(fixture("multiline_popular.json"))
+
+    assert len(timeline) == 53
+    assert timeline[-1].is_partial is True
+    assert not any(point.is_partial for point in timeline[:-1])

@@ -569,3 +569,35 @@ def test_a_client_that_cannot_be_built_is_a_refusal_rather_than_a_crash(
         engine.dispose()
 
     assert fragment in raised.value.message  # type: ignore[attr-defined]
+
+
+def test_more_seed_keywords_than_google_accepts_is_refused_locally(tmp_path: Path) -> None:
+    """The API takes at most twenty, and answers a longer seed with a generic error.
+
+    By then the request has been throttled, sent and charged against the
+    account's quota, and what comes back says nothing the caller can act on. The
+    research pipeline already batches by twenty; the direct path did not.
+    """
+    with pytest.raises(InvalidConfigurationError) as raised:
+        AdsSeed(keywords=[f"keyword {index}" for index in range(21)]).mode()
+
+    assert "at most 20 seed keywords" in raised.value.message
+
+
+def test_both_requests_ask_for_the_average_cpc_they_parse(tmp_path: Path) -> None:
+    """The value is behind a flag that defaults off.
+
+    The parser read `average_cpc_micros` regardless, so the field was null in
+    every live reply while the fakes in these tests filled it in — the one shape
+    of dead field the tests cannot catch on their own.
+    """
+    service = FakeService()
+    provider, engine = _provider(_credentials(tmp_path / "data"), service)
+    try:
+        anyio.run(provider.keyword_ideas, AdsSeed(keywords=["keyword"]), Market.parse("en", "US"))
+        anyio.run(provider.historical_metrics, ["keyword"], Market.parse("en", "US"))
+    finally:
+        engine.dispose()
+
+    for _endpoint, request in service.calls:
+        assert request["historical_metrics_options"] == {"include_average_cpc": True}

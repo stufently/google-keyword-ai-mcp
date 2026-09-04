@@ -26,11 +26,17 @@ range, so the result matches a single ranged request rather than approximating
 one. Rows come back most-clicked first.
 
 About 50,000 rows per property, search type, and day is an upper bound on what
-the API exposes, not a guarantee that the response is complete. When collection
-reaches the configured daily cap *and rows remained to read*, `truncated` is
-`true`, `truncation_reason` explains which boundary was reached, and the
-envelope has `completeness` set to `partial`. Consumers must not treat such a
-result as a complete export.
+the API exposes, not a guarantee that the response is complete.
+`search_console_daily_row_cap` takes its name from that figure but is spent once
+across the whole call, not afresh on each day of data: Google budgets extraction
+per property per calendar day of *requests*, so a counter that reset on every
+day of data would quietly spend that budget once per day of the window and still
+call the answer complete. A 28-day window therefore stops after the cap wherever
+it falls, and the days beyond it are never requested — the truncation reason
+names the day it stopped on. When the cap is reached *and rows remained to
+read*, `truncated` is `true`, `truncation_reason` explains which boundary was
+reached, and the envelope has `completeness` set to `partial`. Consumers must
+not treat such a result as a complete export.
 
 The cap bounds what is asked for, not only what is counted afterwards: each
 request asks for `min(row_limit, cap - rows_fetched)` rows. Checking the cap
@@ -38,8 +44,8 @@ only after a full page arrived would spend up to `row_limit` rows past it —
 25,000 with the defaults — which would make a setting named "cap" no such
 thing. The price is that a request the cap shrinks cannot prove nothing
 remained, so it is reported as truncated even where the data happened to end
-there. A day that finishes below the cap returns a short page, which does prove
-it, and stays complete.
+there. A range that finishes below the cap returns a short page, which does
+prove it, and stays complete.
 
 Search Console data for the newest days can still be incomplete. Default query
 windows therefore end on the day before yesterday, not today or yesterday.

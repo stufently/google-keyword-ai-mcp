@@ -60,6 +60,10 @@ class KeywordIdea(BaseModel):
     metrics: KeywordMetrics
 
 
+# The API's own ceiling on `KeywordSeed` and `KeywordAndUrlSeed`.
+_MAX_SEED_KEYWORDS = 20
+
+
 class AdsSeed(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -68,6 +72,16 @@ class AdsSeed(BaseModel):
     site: str | None = None
 
     def mode(self) -> str:
+        # Google accepts at most twenty keywords in a seed, and answers a longer
+        # one with a generic API error -- after the request has been throttled,
+        # sent, and charged against the account's quota. The pipeline already
+        # batches by twenty; the direct path did not, so `gkai ads ideas` with
+        # twenty-five keywords spent a call to be told nothing useful.
+        if len(self.keywords) > _MAX_SEED_KEYWORDS:
+            raise InvalidConfigurationError(
+                f"Google Ads accepts at most {_MAX_SEED_KEYWORDS} seed keywords, "
+                f"and {len(self.keywords)} were given."
+            )
         has_keywords = bool(self.keywords)
         has_url = bool(self.url)
         has_site = bool(self.site)
@@ -462,6 +476,10 @@ class GoogleAdsProvider(Provider):
             "language": market.ads_language_resource(),
             "geo_target_constants": [market.ads_geo_target_resource()],
             "include_adult_keywords": include_adult,
+            # `average_cpc` is behind this flag and defaults off, so the parser
+            # read a value the request never asked for and the field was null in
+            # every live reply while the fakes in the tests filled it in.
+            "historical_metrics_options": {"include_average_cpc": True},
             "page_size": self._settings.google_ads_page_size,
             "keyword_plan_network": _NETWORK,
         }
@@ -512,6 +530,10 @@ class GoogleAdsProvider(Provider):
             "language": market.ads_language_resource(),
             "geo_target_constants": [market.ads_geo_target_resource()],
             "keyword_plan_network": _NETWORK,
+            # Same flag as the ideas request: without it `average_cpc` comes
+            # back unset on every reply and the field this provider publishes is
+            # null for reasons that have nothing to do with the keyword.
+            "historical_metrics_options": {"include_average_cpc": True},
         }
         if self._rate_limiter is None:
             raise ProviderUnavailableError("Google Ads rate limiter is not configured.")

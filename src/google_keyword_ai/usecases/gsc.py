@@ -224,20 +224,15 @@ def run_gsc_queries(
     requested_dimensions = ["query"] if dimensions is None else list(dimensions)
     start_text = "" if start_date is None else str(start_date)
     end_text = "" if end_date is None else str(end_date)
-    try:
-        start, end = _date_window(days=days, start_date=start_date, end_date=end_date)
-        start_text = start.isoformat()
-        end_text = end.isoformat()
-        market = _market(settings, country)
-    except _GSC_ERRORS as exc:
-        return _error_queries(
-            provider,
-            site_url,
-            start_text,
-            end_text,
-            requested_dimensions,
-            str(exc),
-        )
+    # Raised, not wrapped: an unusable date range or an unknown country is a
+    # refused request, and the contract says a refusal carries `data: null`.
+    # Answering it with a payload meant inventing a window -- `start_date` and
+    # `end_date` came back as empty strings -- and presenting that as a result.
+    # `require_positive_limit` above already refuses this way.
+    start, end = _date_window(days=days, start_date=start_date, end_date=end_date)
+    start_text = start.isoformat()
+    end_text = end.isoformat()
+    market = _market(settings, country)
 
     try:
         engine = open_database(settings)
@@ -347,11 +342,10 @@ def run_gsc_opportunities(
 ) -> Envelope[OpportunitiesData]:
     require_positive_limit(limit, "Opportunity")
     provider = _provider_info()
-    try:
-        start, end = _date_window(days=days, start_date=None, end_date=None)
-        market = _market(settings, country)
-    except _GSC_ERRORS as exc:
-        return _error_opportunities(provider, settings, site_url, "", "", str(exc))
+    # Raised for the same reason as in `run_gsc_queries`: a refused request has
+    # no window to report, and inventing one was the only way to fill a payload.
+    start, end = _date_window(days=days, start_date=None, end_date=None)
+    market = _market(settings, country)
 
     try:
         engine = open_database(settings)

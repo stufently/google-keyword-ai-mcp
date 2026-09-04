@@ -6,10 +6,20 @@ from pydantic import BaseModel, Field
 
 
 class TrendPoint(BaseModel):
+    """One bucket of the interest timeline.
+
+    `is_partial` marks a week that has not finished yet -- Google returns the
+    current week with the days so far, and the golden capture shows exactly one
+    such point at the end. Its value is a fragment, not a week, so it must not
+    be averaged alongside whole ones; it is kept in the payload because Google
+    really did return it.
+    """
+
     timestamp: datetime
     formatted_time: str
     values: list[int]
     has_data: list[bool] = Field(default_factory=list)
+    is_partial: bool = False
 
 
 class GeoInterest(BaseModel):

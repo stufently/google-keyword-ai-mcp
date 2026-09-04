@@ -20,13 +20,14 @@ CLI, MCP-сервер и Claude-скил для сбора и анализа п�
 ```
 src/google_keyword_ai/
   config.py errors.py logging.py market.py envelope.py   # каркас
+  targets.py                                             # разбор цели-конкурента
   http.py ratelimit.py cache.py normalize.py             # инфраструктура
   expansion.py scoring.py clustering.py opportunities.py # алгоритмы
   storage/     engine.py migrations.py                   # SQLite, user_version
   providers/   autocomplete.py expander.py google_ads.py search_console.py
                trends/{models,unofficial,official,provider}.py
   pipeline/    budget.py models.py scenarios.py runs.py executor.py
-  usecases/    doctor suggest expand trends ads gsc research runs analysis
+  usecases/    doctor suggest expand trends ads gsc research runs analysis limits
   reports/     markdown.py
   cli/main.py  mcp/server.py  data/{alphabets,modifiers}
 ```

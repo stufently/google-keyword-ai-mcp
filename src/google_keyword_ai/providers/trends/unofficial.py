@@ -103,6 +103,7 @@ def parse_timeline(payload: str) -> list[TrendPoint]:
                     formatted_time=raw["formattedTime"],
                     values=raw["value"],
                     has_data=raw.get("hasData", []),
+                    is_partial=bool(raw.get("isPartial", False)),
                 )
             )
     except (KeyError, TypeError, ValueError, ValidationError) as exc:

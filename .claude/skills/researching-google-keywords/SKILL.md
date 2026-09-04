@@ -67,9 +67,10 @@ Read [the metrics guide](reference/metrics.md) before interpreting fields or sco
 - `completeness: complete` means the requested result completed.
 - `completeness: partial` means usable data is missing: explicitly tell the user
   what is absent using `completeness_reason`, `warnings` and `errors`.
-- The CLI exits 1 for `partial` and `empty` and 2 only for a malformed command
-  line. A non-zero exit still prints a valid envelope, so parse stdout before
-  calling a run failed.
+- The CLI exits 1 for `partial` and `empty`, and prints a valid envelope with
+  it: parse stdout before calling a run failed. Exit 2 means the parser rejected
+  the command line, nothing ran, and stdout is empty — that one is a real
+  failure to report.
 - `completeness: empty` means there is no usable data; state the reason and do not
   turn missing values into zeroes.
 - Read `data_quality.sources` for availability and actual use, then report every

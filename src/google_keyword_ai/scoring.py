@@ -171,6 +171,22 @@ def _is_measured(point: TrendPoint) -> bool:
     return bool(point.values) and (not point.has_data or bool(point.has_data[0]))
 
 
+def _whole_weeks(trends: TrendsResult) -> list[TrendPoint]:
+    """Drop the unfinished week from the end of the series.
+
+    Google returns the current week with only the days that have happened, and
+    marks it `isPartial`. Averaged in alongside whole weeks it is a fragment
+    counted as a full one, and it sits inside the latest quarter, which is the
+    half of the comparison the answer is about: a week measured over two days of
+    seven can move the growth figure across zero on its own. It stays in the
+    payload -- Google really did return it -- and only the comparison ignores it.
+    """
+    timeline = list(trends.timeline)
+    while timeline and timeline[-1].is_partial:
+        timeline.pop()
+    return timeline
+
+
 def trend_growth_gap(trends: TrendsResult | None) -> str | None:
     """Name the reason there is no growth figure, or None if there is one.
 
@@ -183,11 +199,12 @@ def trend_growth_gap(trends: TrendsResult | None) -> str | None:
     """
     if trends is None:
         return "no Trends data was collected"
-    if len(trends.timeline) < 8:
-        return "the timeline is shorter than the eight points a comparison needs"
-    quarter = len(trends.timeline) // 4
-    latest = trends.timeline[-quarter:]
-    previous = trends.timeline[-2 * quarter : -quarter]
+    timeline = _whole_weeks(trends)
+    if len(timeline) < 8:
+        return "the timeline is shorter than the eight finished weeks a comparison needs"
+    quarter = len(timeline) // 4
+    latest = timeline[-quarter:]
+    previous = timeline[-2 * quarter : -quarter]
     if not all(_is_measured(point) for point in (*latest, *previous)):
         return "one of the two quarters being compared has a week Google could not measure"
     if sum(point.values[0] for point in previous) == 0:
@@ -209,9 +226,11 @@ def compute_trend_growth(trends: TrendsResult | None) -> float | None:
     Anything less is reported as no trend at all, which is the honest answer
     when the recent period is the part that is missing.
     """
-    if trends is None or len(trends.timeline) < 8:
+    if trends is None:
         return None
-    timeline = trends.timeline
+    timeline = _whole_weeks(trends)
+    if len(timeline) < 8:
+        return None
     quarter = len(timeline) // 4
     if quarter == 0:
         return None

@@ -6,7 +6,11 @@ import pytest
 from google_keyword_ai.config import Settings
 from google_keyword_ai.pipeline.models import ResearchKeyword
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
-from google_keyword_ai.scoring import compute_trend_growth, score_keyword
+from google_keyword_ai.scoring import (
+    compute_trend_growth,
+    score_keyword,
+    trend_growth_gap,
+)
 
 
 def keyword(**values: object) -> ResearchKeyword:
@@ -168,3 +172,29 @@ def test_the_trend_explanation_names_the_series_it_came_from() -> None:
     trend = next(component for component in scored.components if component.name == "trend")
     assert "thai street food" in trend.explanation
     assert "not a per-keyword trend" in trend.explanation
+
+
+def test_the_unfinished_week_is_not_averaged_as_a_whole_one() -> None:
+    """Google returns the current week with only the days that have happened.
+
+    It marks that point `isPartial`, and the golden capture carries exactly one,
+    at the end — inside the latest quarter, which is the half of the comparison
+    the answer is about. A week measured over two days of seven, averaged in as
+    a full one, can move the growth figure across zero by itself.
+    """
+    finished = trends([10] * 6 + [20] * 2)
+    with_fragment = trends([10] * 6 + [20] * 2 + [0])
+    with_fragment.timeline[-1].is_partial = True
+
+    assert compute_trend_growth(with_fragment) == compute_trend_growth(finished)
+    assert compute_trend_growth(finished) == pytest.approx(1.0)
+
+
+def test_a_series_of_only_unfinished_weeks_has_no_comparison() -> None:
+    """Trimming the fragment can leave too little to compare, and that is said."""
+    fragments = trends([10] * 9)
+    for point in fragments.timeline[-2:]:
+        point.is_partial = True
+
+    assert compute_trend_growth(fragments) is None
+    assert "finished weeks" in (trend_growth_gap(fragments) or "")

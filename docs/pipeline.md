@@ -11,7 +11,13 @@ waste calls or erase the meaning of the input.
 - `niche`: expand a topic, deduplicate and filter, enrich selected candidates in
   Ads batches of at most 20, then request Trends for the original seed.
 - `competitor`: request Ads ideas for a domain or URL, with optional keyword and
-  URL seed; if Ads is unavailable, expand the optional seed with Autocomplete.
+  URL seed; if Ads is
+  unavailable *or its call budget is spent*, expand the optional seed with
+  Autocomplete. A run already past `max_runtime_seconds` starts no fallback: the
+  expander keeps its own clock and starts it fresh on every call, so a fallback
+  launched past the ceiling would spend the whole runtime allowance a second
+  time. Each of the three outcomes — no credentials, spent call budget, spent
+  clock — is named in its own warning.
 - `site`: read Search Console query/page rows, derive opportunities, enrich those
   queries in Ads, then request Trends for the highest-impression query.
 

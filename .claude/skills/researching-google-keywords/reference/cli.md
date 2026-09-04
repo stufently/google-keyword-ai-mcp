@@ -20,6 +20,11 @@ Every command prints its envelope to stdout and then exits according to
 
 Never report exit 1 as a failed run without parsing the envelope first.
 
+`gkai research --format markdown` is the one command that does not print an
+envelope on stdout: it prints the report there instead, and on a `partial` or
+`empty` run writes `completeness`, `completeness_reason`, `warnings` and
+`errors` to stderr as JSON. Read those before presenting the report as whole.
+
 ## Availability and configuration
 
 ```bash

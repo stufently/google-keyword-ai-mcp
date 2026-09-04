@@ -98,7 +98,8 @@ actually asked. Saved configuration snapshots use masked values. See
 - M5: Google Ads ideas, metrics and interprocess throttling.
 - M6: Search Console queries and opportunities.
 - M7: niche, competitor and existing-site pipelines with budgets and dry-run.
-- M8: durable runs, checkpoints, resume, rerun and schema v2.
+- M8: durable runs, checkpoints, resume, rerun and schema v2 (v3 added the
+  seed keyword and result limit, so a repeat asks the question that was asked).
 - M9: scoring, lexical clustering, reports and analysis commands.
 - M10: CLI/MCP documentation, Claude skill and documentation consistency tests.
 
