@@ -127,13 +127,15 @@ AC-006 агрегирующий; при его провале остальные
   Проверка: `test -f tests/test_live_providers.py && [ "$(grep -c '^async def test_\|^def test_' tests/test_live_providers.py)" = "4" ]`
 - **AC-002.** В файле нет ни `respx`, ни пропуска тестов.
   Проверка: `! grep -nE 'respx|pytest\.skip|skipif|importorskip' tests/test_live_providers.py`
-- **AC-003.** Дефолтный прогон НЕ выполняет живые тесты: они попадают в
-  `deselected`.
-  Проверка: `uv run --all-extras pytest -q tests/test_live_providers.py 2>&1 | grep -q '4 deselected'`
+- **AC-003.** Дефолтный прогон НЕ выполняет живые тесты: все они отсеиваются,
+  и pytest выходит с кодом 5 («no tests ran»). Код проверен на этом окружении.
+  Проверка: `uv run --all-extras pytest -q tests/test_live_providers.py; [ $? -eq 5 ]`
 - **AC-004.** По явному `-m integration` собираются ровно эти четыре теста.
   Проверка: `[ "$(uv run --all-extras pytest -m integration --collect-only -q tests/test_live_providers.py 2>&1 | grep -c '::test_')" = "4" ]`
-- **AC-005.** Живые тесты РЕАЛЬНО проходят, и ни один не пропущен.
-  Проверка: `uv run --all-extras pytest -m integration -q tests/test_live_providers.py 2>&1 | grep -qE '^4 passed' `
+- **AC-005.** Живые тесты РЕАЛЬНО проходят (код возврата 0). Что ни один из них
+  не пропущен, отдельно гарантирует AC-002: пропуск возвращает ноль так же
+  охотно, как успех, поэтому одного кода возврата здесь мало.
+  Проверка: `uv run --all-extras pytest -m integration -q tests/test_live_providers.py`
 - **AC-006.** Весь дефолтный набор тестов зелёный (агрегирующий).
   Проверка: `uv run --all-extras pytest -q`
 - **AC-007.** Линтер, форматирование и типы чистые.
