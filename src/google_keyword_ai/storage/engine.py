@@ -16,14 +16,14 @@ def database_path(settings: Settings) -> Path:
 
 BUSY_TIMEOUT_MS = 5000
 
-# The busy timeout and the journal mode are applied first and by hand, in that
-# order: the timeout has to be in force before anything can wait on a lock, and
-# the WAL switch needs handling the others do not. They stay listed here so the
-# set of settings this project depends on is still readable in one place, and so
-# the tests can assert every one of them.
+_WAL_PRAGMA = "PRAGMA journal_mode=WAL"
+
+# The busy timeout comes first on purpose: nothing can wait on a lock until it
+# is in force. The journal mode is applied through `_enable_wal` rather than
+# executed directly, because that one switch needs handling the others do not.
 PRAGMAS: tuple[str, ...] = (
     f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}",
-    "PRAGMA journal_mode=WAL",
+    _WAL_PRAGMA,
     "PRAGMA synchronous=NORMAL",
     "PRAGMA foreign_keys=ON",
 )
@@ -41,10 +41,11 @@ def apply_sqlite_pragmas(dbapi_connection: Any) -> None:
     dbapi_connection.autocommit = True
     cursor = dbapi_connection.cursor()
     try:
-        cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-        _enable_wal(cursor)
         for statement in PRAGMAS:
-            cursor.execute(statement)
+            if statement == _WAL_PRAGMA:
+                _enable_wal(cursor)
+            else:
+                cursor.execute(statement)
     finally:
         cursor.close()
         dbapi_connection.autocommit = previous_autocommit
