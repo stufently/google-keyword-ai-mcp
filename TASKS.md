@@ -7,10 +7,11 @@
 ## IN_PROGRESS
 
 - **M14 — верхняя граница объёма кеша.** Спека
-  `docs/specs/m14-cache-size-limit.md`, исполнитель Codex, прогон идёт.
+  `docs/specs/m14-cache-size-limit.md`, исполнитель Codex, прогон идёт (заход resume; первый заход встал, попросив
+  подтверждения дизайна, — `codex exec` его запросить не может).
   Клон `/home/deploy/github/google-keyword-ai-mcp-codex`, ветка
   `m14-cache-size-limit`, каталог прогона `/home/deploy/.cache/codex-build/google-keyword-ai-mcp-codex/20260904T134351Z-start`.
-  Наблюдать: `~/.claude/skills/codex-build/scripts/watch.sh /home/deploy/.cache/codex-build/google-keyword-ai-mcp-codex/20260904T134351Z-start`
+  Наблюдать: `~/.claude/skills/codex-build/scripts/watch.sh /home/deploy/.cache/codex-build/google-keyword-ai-mcp-codex/20260904T134600Z-resume`
   (после перезапуска сессии Monitor нужно взвести заново этой командой).
   Пагинацию Google Ads не брать: без developer token спека унаследует догадку.
 
