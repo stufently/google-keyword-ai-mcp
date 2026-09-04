@@ -105,6 +105,16 @@ class GoogleTrendsProvider(Provider):
                 hl=hl,
             )
             self.warnings = list(self._unofficial.warnings)
+            if self._unofficial.all_widgets_failed():
+                # Nothing came back, so this is an outage rather than an answer.
+                # The TTL measures how fast Google's numbers go stale, not how
+                # long a block lasts; storing one under the other makes a
+                # rate-limited moment the answer for the next six hours, and the
+                # run after it reads "no Trends data" off disk without asking
+                # Google again. The client says outright which widgets it asked
+                # for and which were refused, because the result cannot: a
+                # keyword Google has no data for comes back just as empty.
+                return result
 
         payload = _CachedResponse(result=result, warnings=self.warnings).model_dump_json().encode()
         self._cache.set(

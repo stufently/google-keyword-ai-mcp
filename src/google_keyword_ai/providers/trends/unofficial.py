@@ -179,6 +179,12 @@ class UnofficialTrendsClient:
         self._consecutive_failures = 0
         self._circuit_open = False
         self.warnings: list[str] = []
+        # How the last fetch's widgets went. The result alone cannot say: a
+        # keyword Google has no interest data for and a keyword whose widgets
+        # were all refused both come back empty, and only these counters
+        # separate them.
+        self.widgets_attempted = 0
+        self.widgets_failed = 0
         self._client.headers["User-Agent"] = settings.http_user_agent
         self._client.headers["Accept-Language"] = settings.default_language
         self._client.headers["Referer"] = REFERER
@@ -215,6 +221,14 @@ class UnofficialTrendsClient:
             settings=self._settings,
         )
 
+    def all_widgets_failed(self) -> bool:
+        """Say whether every widget the last fetch asked for was refused.
+
+        Widgets `explore` never offered are not asked for and are not counted:
+        their absence is Google's answer, not a failure to reach it.
+        """
+        return self.widgets_attempted > 0 and self.widgets_failed == self.widgets_attempted
+
     def _record_failure(self) -> None:
         self._consecutive_failures += 1
         if self._consecutive_failures >= self._settings.trends_circuit_breaker_failures:
@@ -232,6 +246,8 @@ class UnofficialTrendsClient:
             raise ProviderUnavailableError("Google Trends circuit breaker is open.")
 
         self.warnings = []
+        self.widgets_attempted = 0
+        self.widgets_failed = 0
         keyword_list = list(keywords)
         self._client.headers["Accept-Language"] = hl
         try:
@@ -272,9 +288,11 @@ class UnofficialTrendsClient:
             if requested_widget:
                 await anyio.sleep(self._settings.trends_pacing_seconds)
             requested_widget = True
+            self.widgets_attempted += 1
             request = widget.get("request")
             token = widget.get("token")
             if not isinstance(request, dict) or not isinstance(token, str):
+                self.widgets_failed += 1
                 self.warnings.append(f"{widget_id}: invalid widget metadata")
                 continue
             try:
@@ -298,9 +316,18 @@ class UnofficialTrendsClient:
                 elif widget_id == "RELATED_QUERIES":
                     related = parse_related(response.text)
             except (RateLimitError, NetworkError, ApiError, ProviderUnavailableError) as exc:
+                self.widgets_failed += 1
                 self.warnings.append(f"{widget_id}: {exc}")
 
-        self._consecutive_failures = 0
+        if self.all_widgets_failed():
+            # Nothing came back, so the request failed as surely as a dead
+            # `explore` -- and the breaker exists to stop asking a blocked
+            # endpoint. Counting only the earlier stages let a run whose every
+            # widget was refused reset the counter and go again, which is the
+            # opposite of what the breaker is for.
+            self._record_failure()
+        else:
+            self._consecutive_failures = 0
         return TrendsResult(
             keywords=keyword_list,
             geo=geo,

@@ -562,3 +562,116 @@ def test_the_row_cap_is_part_of_the_cache_key(tmp_path: Path) -> None:
     assert reopened.calls, "the raised cap reused the answer capped at one row"
     assert raised.truncated is False
     assert [row.keys["query"] for row in raised.rows] == ["one", "two"]
+
+
+def test_a_property_that_cannot_be_read_is_an_api_error(tmp_path: Path) -> None:
+    """A missing field in the property list must not surface as a crash.
+
+    Rows already report an unreadable reply as `ApiError`; the property list
+    reads its two fields by subscript and was left out. A `KeyError` is no
+    `GkaiError`, so a reply that stops carrying `permissionLevel` reaches the
+    facades as an opaque tool failure rather than as a provider whose answer
+    could not be read.
+    """
+    service = FakeService(properties=[{"siteUrl": "sc-domain:example.com"}])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        with pytest.raises(ApiError) as raised:
+            anyio.run(provider.list_properties)
+    finally:
+        engine.dispose()
+
+    assert "Search Console property list could not be read" in raised.value.message
+
+
+def test_a_property_reply_that_is_not_an_object_is_an_api_error(tmp_path: Path) -> None:
+    """The reply's own shape is part of what has to be read.
+
+    `siteEntry` is pulled off the root with `.get`, through a cast that converts
+    nothing. A root that is not a mapping has no `get` at all, and that
+    `AttributeError` is no `GkaiError` either -- so the shape check belongs
+    under the same guard as the fields it protects.
+    """
+
+    class ListShapedService(FakeService):
+        def list(self) -> FakeRequest:
+            return FakeRequest(self, ["sc-domain:example.com"])
+
+    provider, engine = _provider(_settings(tmp_path), ListShapedService())
+    try:
+        with pytest.raises(ApiError) as raised:
+            anyio.run(provider.list_properties)
+    finally:
+        engine.dispose()
+
+    assert "Search Console property list could not be read" in raised.value.message
+
+
+def test_a_query_reply_that_is_not_an_object_is_an_api_error(tmp_path: Path) -> None:
+    """The row reply's shape is read under the same guard as the rows.
+
+    `rows` used to be pulled off the root before `_parse_rows` was entered, so a
+    root that is not a mapping raised a bare `AttributeError` one line short of
+    the guard written to catch exactly that kind of change.
+    """
+    service = FakeService([["not", "an", "object"]])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        with pytest.raises(ApiError) as raised:
+            _query(
+                provider,
+                "sc-domain:example.com",
+                start_date=date(2026, 8, 1),
+                end_date=date(2026, 8, 1),
+                dimensions=["query"],
+            )
+    finally:
+        engine.dispose()
+
+    assert "Search Console response could not be read" in raised.value.message
+
+
+def test_a_credentials_file_google_rejects_is_a_configuration_error(tmp_path: Path) -> None:
+    """A typo in the credentials file is a configuration problem, not a crash.
+
+    Only the `type` field is checked here; everything the type actually needs is
+    checked by Google's own loader, which raises a bare `ValueError`. That is no
+    `GkaiError`, so a service-account file missing its key reached the caller as
+    a traceback instead of the refusal envelope both facades promise.
+    """
+    settings = _settings(tmp_path)
+    assert settings.search_console_credentials_path is not None
+    settings.search_console_credentials_path.write_text(
+        json.dumps({"type": "service_account", "client_email": "nobody@example.com"}),
+        encoding="utf-8",
+    )
+    provider = SearchConsoleProvider(settings=settings, cache=None, rate_limiter=None)
+
+    with pytest.raises(InvalidConfigurationError) as raised:
+        provider.load_credentials()
+
+    assert "is not usable" in raised.value.message
+
+
+def test_a_reply_without_a_rows_key_is_an_empty_page(tmp_path: Path) -> None:
+    """Search Console omits `rows` entirely when a range has no data.
+
+    That is an ordinary empty answer, not a malformed reply, so the key is read
+    with a default rather than by subscript -- reading it by subscript would
+    turn every quiet day into an error.
+    """
+    service = FakeService([{}])
+    provider, engine = _provider(_settings(tmp_path), service)
+    try:
+        page = _query(
+            provider,
+            "sc-domain:example.com",
+            start_date=date(2026, 8, 1),
+            end_date=date(2026, 8, 1),
+            dimensions=["query"],
+        )
+    finally:
+        engine.dispose()
+
+    assert page.rows == []
+    assert not page.truncated

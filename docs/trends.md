@@ -22,9 +22,18 @@ with `)]}',` and a newline. The parser strips the common marker and discards
 everything before the first JSON object; no fixed-length slice is used.
 
 A failure of one widget yields a partial result with a warning. A failure of the
-warm-up or of `explore` fails the whole request. After a configured number of
-such consecutive failures the circuit breaker rejects new calls immediately, so
-as not to deepen the block or waste time on a network that is bound to fail.
+warm-up or of `explore` fails the whole request, and so does a request whose
+every widget was refused: nothing came back either way. A widget `explore` never
+listed is not requested and is not a failure — its absence is Google's answer.
+
+A request that failed in any of those three ways counts towards the circuit
+breaker, which rejects new calls immediately once a configured number of them
+land in a row, so as not to deepen the block or waste time on a network that is
+bound to fail. A request whose widgets all failed is also kept out of the cache,
+so the next run asks again rather than reading the outage back for the rest of
+the TTL. Whether a widget answered is what decides this, not whether the answer
+had rows in it: a keyword Google has no interest data for comes back just as
+empty, and that result is cached like any other.
 
 ## Normalization and comparison
 

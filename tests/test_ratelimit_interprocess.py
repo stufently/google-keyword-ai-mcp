@@ -92,3 +92,36 @@ def test_acquire_waits_while_another_process_holds_the_lock(tmp_path: Path) -> N
                 worker.communicate(timeout=30)
     finally:
         holder.close()
+
+
+def test_a_damaged_lock_file_paces_instead_of_crashing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Garbage in the lock file must not read as "no request has been issued".
+
+    `float` raises a bare `ValueError` on it, which is no `GkaiError` and would
+    surface as a crash. Reading it as "none yet" would be worse than crashing:
+    the call would go straight through and break the one-per-second limit this
+    file exists to hold. It is read as "one was just issued" instead, which
+    costs a single interval.
+    """
+    monkeypatch.setattr(anyio.to_thread, "run_sync", _working_thread_runner)
+    lock_path = tmp_path / "data" / "google-ads-customer.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("not a timestamp\n", encoding="utf-8")
+    limiter = InterProcessRateLimiter(10.0, lock_path)
+
+    # The wait is recorded rather than measured: a wall-clock threshold small
+    # enough to sit under one interval is also small enough for thread-pool
+    # setup on a busy machine to cross on its own.
+    waits: list[float] = []
+
+    async def record_sleep(delay: float) -> None:
+        waits.append(delay)
+
+    monkeypatch.setattr(anyio, "sleep", record_sleep)
+    anyio.run(limiter.acquire)
+
+    assert waits, "a lock file that cannot be read let the call through unthrottled"
+    assert waits[0] > 0
+    assert float(lock_path.read_text(encoding="utf-8").strip()) > 0

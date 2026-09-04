@@ -26,6 +26,24 @@ class AsyncRateLimiter:
             self._last_issued_at = anyio.current_time()
 
 
+def _parse_timestamp(stored: str) -> float | None:
+    """Read the timestamp of the last issued request from the lock file.
+
+    An empty file means no request has been issued yet. A damaged one means the
+    opposite is unknown -- and `float` would raise a bare `ValueError` there,
+    which is no `GkaiError` and would surface as a crash. Reading it as "one was
+    just issued" costs at most a single interval of waiting, where reading it as
+    "none yet" would let the call straight through and break the very limit the
+    file exists to hold.
+    """
+    if not stored:
+        return None
+    try:
+        return float(stored)
+    except ValueError:
+        return time.time()
+
+
 class InterProcessRateLimiter:
     def __init__(self, rate_per_second: float, lock_path: Path) -> None:
         if rate_per_second <= 0:
@@ -40,7 +58,7 @@ class InterProcessRateLimiter:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             lock_file.seek(0)
             stored = lock_file.read().strip()
-            return lock_file, float(stored) if stored else None
+            return lock_file, _parse_timestamp(stored)
         except BaseException:
             lock_file.close()
             raise

@@ -505,3 +505,45 @@ def test_replay_refreshes_the_checkpoint_of_a_reused_stage(tmp_path: Path) -> No
         assert second_resume.keywords[0].keyword == "fresh keyword"
     finally:
         engine.dispose()
+
+
+def test_a_saved_result_that_cannot_be_read_is_not_a_crash(tmp_path: Path) -> None:
+    """A resume that finds a damaged result must answer, not raise.
+
+    Every stage is reusable and every checkpoint records a skipped source, so
+    the executor falls back to the run's own stored result. That blob is read
+    back with the same `model_validate` the checkpoints use, but without their
+    guard: a `ValidationError` is a `ValueError` and no `GkaiError`, so a
+    damaged row reaches both facades as a crash rather than as the empty
+    envelope every other unreadable stored value produces.
+    """
+    settings = Settings(data_dir=tmp_path / "damaged-result")
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        stages = [Stage(name="expand", position=0, fingerprint_payload={})]
+        record = _record(
+            settings,
+            stages,
+            statuses={"expand": StageStatus.COMPLETED},
+            attempts=1,
+            checkpoint={"skipped": True, "reason": "unavailable"},
+        )
+        record.result = {"data": {"scenario": ["not", "a", "name"]}}
+        store.create(record)
+        context = _context(settings)
+        scenario = FakeScenario()
+        data = anyio.run(
+            partial(
+                RunExecutor(store, scenario, stages).execute,
+                record,
+                context,
+                resume=True,
+            )
+        )
+    finally:
+        engine.dispose()
+
+    assert scenario.calls == 0, "every stage was reusable, so nothing should have replayed"
+    assert data.keywords == []
+    assert context.warnings, "a resume that recovered nothing has to say so"

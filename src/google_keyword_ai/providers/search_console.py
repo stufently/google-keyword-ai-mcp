@@ -2,6 +2,7 @@ import json
 from collections.abc import Callable, Sequence
 from datetime import date, timedelta
 from functools import partial
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 import anyio
@@ -135,15 +136,32 @@ class SearchConsoleProvider(Provider):
             loader = cast(
                 Callable[..., object], service_account.Credentials.from_service_account_file
             )
-            return loader(path, scopes=[READONLY_SCOPE])
+            return self._load_with(loader, path)
         if credential_type == "authorized_user":
             from google.oauth2 import credentials
 
             loader = cast(Callable[..., object], credentials.Credentials.from_authorized_user_file)
-            return loader(path, scopes=[READONLY_SCOPE])
+            return self._load_with(loader, path)
         raise InvalidConfigurationError(
             "Search Console credentials type must be 'service_account' or 'authorized_user'."
         )
+
+    @staticmethod
+    def _load_with(loader: Callable[..., object], path: Path) -> object:
+        """Build credentials, reporting a malformed file as a refused configuration.
+
+        The type field is the only thing checked before this point, so a file
+        that names a type but omits the keys that type needs gets as far as
+        Google's own loader -- which raises a bare `ValueError`. That is no
+        `GkaiError`, so a credentials file with a typo in it reaches the caller
+        as a crash rather than as the configuration problem it is.
+        """
+        try:
+            return loader(path, scopes=[READONLY_SCOPE])
+        except ValueError as exc:
+            raise InvalidConfigurationError(
+                f"Search Console credentials file {path} is not usable: {exc}"
+            ) from exc
 
     def build_service(self) -> object:
         if self._service_factory is not None:
@@ -189,14 +207,25 @@ class SearchConsoleProvider(Provider):
             )
         except _http_error_type() as exc:
             raise _translate_http_error(exc) from exc
-        entries = cast(dict[str, Any], response).get("siteEntry", [])
-        return [
-            SiteProperty(
-                site_url=str(entry["siteUrl"]),
-                permission_level=str(entry["permissionLevel"]),
-            )
-            for entry in cast(list[dict[str, object]], entries)
-        ]
+        try:
+            entries = cast(dict[str, Any], response).get("siteEntry", [])
+            return [
+                SiteProperty(
+                    site_url=str(entry["siteUrl"]),
+                    permission_level=str(entry["permissionLevel"]),
+                )
+                for entry in cast(list[dict[str, object]], entries)
+            ]
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            # Both fields are read by subscript through a cast that converts
+            # nothing, so a reply that stops carrying one raises `KeyError`
+            # here -- no `GkaiError`, and the facades report a crash instead of
+            # a provider whose answer could not be read. `_parse_rows` guards
+            # the same way for the same reason. The reply's own shape is read
+            # inside the guard too: a root that is not a mapping has no `get`,
+            # and that `AttributeError` would otherwise escape from the line
+            # above the guard.
+            raise ApiError(f"Search Console property list could not be read: {exc}") from exc
 
     def _cache_key(
         self,
@@ -265,18 +294,21 @@ class SearchConsoleProvider(Provider):
         )
 
     @staticmethod
-    def _parse_rows(
-        raw_rows: Sequence[dict[str, object]], dimensions: Sequence[str]
-    ) -> list[SearchAnalyticsRow]:
+    def _parse_rows(response: object, dimensions: Sequence[str]) -> list[SearchAnalyticsRow]:
         try:
-            return SearchConsoleProvider._parse_rows_strictly(raw_rows, dimensions)
-        except (ValueError, TypeError) as exc:
-            # The casts below are annotations, not conversions: a reply with a
-            # string where a number belongs reaches pydantic unchanged and comes
-            # back as a `ValidationError`, which is a `ValueError` and no
+            raw_rows = cast(dict[str, Any], response).get("rows", [])
+            return SearchConsoleProvider._parse_rows_strictly(
+                cast(list[dict[str, object]], raw_rows), dimensions
+            )
+        except (ValueError, TypeError, AttributeError) as exc:
+            # The casts here and below are annotations, not conversions: a reply
+            # with a string where a number belongs reaches pydantic unchanged and
+            # comes back as a `ValidationError`, which is a `ValueError` and no
             # `GkaiError`. Neither facade recognises that as an answer, so a
             # changed response shape reads as a crash in the tool rather than as
-            # a provider that cannot be read.
+            # a provider that cannot be read. The reply's own shape is unwrapped
+            # inside the guard for the same reason: a root that is not a mapping,
+            # or a row that is not one, has no `get` and raises `AttributeError`.
             raise ApiError(f"Search Console response could not be read: {exc}") from exc
 
     @staticmethod
@@ -389,10 +421,7 @@ class SearchConsoleProvider(Provider):
                     )
                 except _http_error_type() as exc:
                     raise _translate_http_error(exc) from exc
-                raw_rows = cast(dict[str, Any], response).get("rows", [])
-                page_rows = self._parse_rows(
-                    cast(list[dict[str, object]], raw_rows), requested_dimensions
-                )
+                page_rows = self._parse_rows(response, requested_dimensions)
                 all_rows.extend(page_rows)
                 rows_fetched += len(page_rows)
                 # A full page means another may follow; a short one ends the day.

@@ -123,7 +123,15 @@ def _record_result_data(record: RunRecord) -> ResearchData | None:
     raw = record.result.get("data")
     if not isinstance(raw, dict):
         return None
-    return ResearchData.model_validate(raw)
+    try:
+        return ResearchData.model_validate(raw)
+    except ValidationError:
+        # Read back exactly like a checkpoint, and guarded for the same reason:
+        # a stored blob that no longer validates is not an answer. Escaping,
+        # the `ValidationError` is a `ValueError` and no `GkaiError`, so a
+        # resume of a damaged run reads as a crash in the tool -- while every
+        # other unreadable stored value here produces an honest empty envelope.
+        return None
 
 
 def _failed_data(record: RunRecord, context: ScenarioContext) -> ResearchData:

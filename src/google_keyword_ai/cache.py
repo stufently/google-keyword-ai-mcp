@@ -49,11 +49,25 @@ class SqliteCache:
             return None
 
         payload, expires_at = row
-        if expires_at is not None and datetime.fromisoformat(expires_at) <= datetime.now(UTC):
+        if expires_at is not None and self._has_expired(expires_at):
             with self._engine.begin() as connection:
                 connection.exec_driver_sql("DELETE FROM cache_entries WHERE key = ?", (key,))
             return None
         return bytes(payload)
+
+    @staticmethod
+    def _has_expired(expires_at: str) -> bool:
+        """Say whether a stored expiry has passed, counting an unreadable one as past.
+
+        `fromisoformat` raises a bare `ValueError` on a damaged timestamp, and
+        that is no `GkaiError`: a single corrupt row would reach the caller as a
+        crash rather than as a miss. An entry whose expiry cannot be read has no
+        knowable lifetime left, so it is dropped and fetched again.
+        """
+        try:
+            return datetime.fromisoformat(expires_at) <= datetime.now(UTC)
+        except ValueError:
+            return True
 
     def set(
         self,

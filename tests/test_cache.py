@@ -75,3 +75,31 @@ def test_disabled_cache_does_not_read_or_write(data_dir: Path) -> None:
         assert keys == ["existing"]
     finally:
         engine.dispose()
+
+
+def test_an_unreadable_expiry_is_a_miss_rather_than_a_crash(settings: Settings) -> None:
+    """A damaged expiry has no knowable lifetime, so the entry is refetched.
+
+    `fromisoformat` raises a bare `ValueError`, which is no `GkaiError`: one
+    corrupt row would otherwise reach the caller as a crash instead of a miss,
+    and every provider in the project reads its cache through here.
+    """
+    engine = open_database(settings)
+    try:
+        cache = SqliteCache(engine, settings)
+        _set(cache, "damaged")
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE cache_entries SET expires_at = ? WHERE key = ?",
+                ("not a timestamp", "damaged"),
+            )
+
+        assert cache.get("damaged") is None
+
+        with engine.connect() as connection:
+            remaining = connection.exec_driver_sql(
+                "SELECT count(*) FROM cache_entries WHERE key = ?", ("damaged",)
+            ).scalar_one()
+        assert remaining == 0, "an entry that can never be judged fresh should not be kept"
+    finally:
+        engine.dispose()

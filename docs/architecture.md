@@ -65,7 +65,13 @@ it belongs in the key, or raising it would keep serving the short answer it was
 raised to replace. The Trends timezone offset and the Google Ads API version are
 in for the same reason -- the first decides where each bucket of the timeline
 begins, the second decides which API answered, and `parser_version` covers only
-our side of the parse. Per-provider TTLs limit staleness. Async rate limiters pace
+our side of the parse. Per-provider TTLs limit staleness, and they measure how
+fast an answer goes stale rather than how long an outage lasts: a Trends fetch
+whose every widget was refused is not written to the cache, because storing it
+would make one rate-limited moment the answer for the rest of the TTL. What
+decides that is which widgets answered, not whether the answer had rows in it --
+a keyword Google has no interest data for comes back just as empty and is cached
+like any other. Async rate limiters pace
 single-process calls; Google Ads also uses a file lock and timestamp for a shared
 interprocess limit.
 
