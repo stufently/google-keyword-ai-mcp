@@ -6,10 +6,13 @@
 
 ## IN_PROGRESS
 
-Ничего не выполняется. Следующая веха — верхняя граница объёма кеша (колонка
-«когда последний раз читали», миграция схемы №4, политика вытеснения); решение
-владельца через tg-claude-userbot 04.09. Пагинацию Google Ads не брать: без
-developer token спека унаследует догадку.
+- **M14 — верхняя граница объёма кеша.** Спека
+  `docs/specs/m14-cache-size-limit.md`, исполнитель Codex, прогон идёт.
+  Клон `/home/deploy/github/google-keyword-ai-mcp-codex`, ветка
+  `m14-cache-size-limit`, каталог прогона `/home/deploy/.cache/codex-build/google-keyword-ai-mcp-codex/20260904T134351Z-start`.
+  Наблюдать: `~/.claude/skills/codex-build/scripts/watch.sh /home/deploy/.cache/codex-build/google-keyword-ai-mcp-codex/20260904T134351Z-start`
+  (после перезапуска сессии Monitor нужно взвести заново этой командой).
+  Пагинацию Google Ads не брать: без developer token спека унаследует догадку.
 
 ## COMPLETED (2026-09-04)
 
