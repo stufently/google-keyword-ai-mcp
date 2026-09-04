@@ -35,6 +35,12 @@ the TTL. Whether a widget answered is what decides this, not whether the answer
 had rows in it: a keyword Google has no interest data for comes back just as
 empty, and that result is cached like any other.
 
+The envelope reports on the whole reply, not on the timeline alone: geography and
+related queries are answers too, so a keyword with regions but no timeline is
+`complete`. A reply holding none of the three is `empty`, and it names the widget
+that failed when one did -- "no trend data" reads as Google's verdict on the
+keyword, which is the wrong thing to say about a request that never landed.
+
 ## Normalization and comparison
 
 The 0-100 values are normalized only within a single request: 100 means the

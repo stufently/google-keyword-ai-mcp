@@ -187,3 +187,43 @@ def test_opportunities_use_query_and_page_dimensions(
     assert captured["dimensions"] == ["query", "page"]
     assert result.data.opportunities[0].kind == "quick_win"
     assert result.data.thresholds["min_impressions"] == 100
+
+
+def test_rows_that_met_no_threshold_are_not_reported_as_missing_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A site with traffic and no opportunities is not a site with no data.
+
+    Search Console answered with rows; every one of them sat outside the
+    position window or above the CTR ceiling. Reporting that as "no search
+    analytics data" sends the reader to look for a broken property, when the
+    honest answer is that the thresholds — which travel in the same payload —
+    matched nothing.
+    """
+
+    async def fake_query(
+        self: SearchConsoleProvider, site_url: str, **kwargs: object
+    ) -> SearchAnalyticsPage:
+        return SearchAnalyticsPage(
+            rows=[
+                SearchAnalyticsRow(
+                    keys={"query": "brand", "page": "https://example.com/"},
+                    clicks=900,
+                    impressions=1000,
+                    ctr=0.9,
+                    position=1.1,
+                )
+            ],
+            truncated=False,
+            truncation_reason=None,
+        )
+
+    monkeypatch.setattr(SearchConsoleProvider, "query", fake_query)
+
+    result = gsc.run_gsc_opportunities(_settings(tmp_path), "sc-domain:example.com")
+
+    assert result.completeness is Completeness.EMPTY
+    assert result.data.opportunities == []
+    reason = result.completeness_reason or ""
+    assert "no search analytics data" not in reason
+    assert "threshold" in reason, reason

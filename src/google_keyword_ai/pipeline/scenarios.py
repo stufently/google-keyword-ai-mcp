@@ -400,6 +400,13 @@ class NewNicheResearch:
         )
         if filtered:
             context.budget_guard.spend("keywords", len(filtered))
+        elif expansion is not None:
+            # The fan-out ran and left nothing usable behind: every suggestion
+            # was the seed itself, a single character, or there were none. Said
+            # plainly here, because otherwise the empty run is explained by the
+            # next warning to come along -- normally an absent Google Ads, which
+            # had nothing to do with it.
+            context.warnings.append("Autocomplete returned no usable keywords for this seed.")
         keywords = [
             ResearchKeyword(
                 keyword=candidate.raw,
@@ -457,6 +464,7 @@ class CompetitorResearch:
         keywords: list[ResearchKeyword] = []
         expansion: ExpansionStats | None = None
         site_seed = self.seed_keyword is None and is_bare_domain(self.target)
+        ads_available = context.google_ads is not None
         if context.google_ads is not None and context.budget_guard.can_spend("ads"):
             if self.seed_keyword is not None:
                 seed = AdsSeed(keywords=[self.seed_keyword], url=self.target)
@@ -477,11 +485,47 @@ class CompetitorResearch:
                 )
                 if keywords:
                     context.budget_guard.spend("keywords", len(keywords))
+                else:
+                    # The call succeeded and returned nothing. Without this the
+                    # run is empty for no stated reason at all, because every
+                    # warning here describes a source that was missing.
+                    context.warnings.append("Google Ads returned no keyword ideas for this target.")
         else:
-            context.warnings.append(
-                "Google Ads is unavailable; site-based keyword ideas are unavailable."
-            )
-            if self.seed_keyword is not None and context.expander is not None:
+            out_of_time = context.budget_guard.exhausted_reason() == "max_runtime_seconds"
+            # Three different things end here and they call for three different
+            # actions: a missing credential, a number the caller chose, and a
+            # clock that ran out.
+            if not ads_available:
+                context.warnings.append(
+                    "Google Ads is unavailable; site-based keyword ideas are unavailable."
+                )
+            elif out_of_time:
+                context.warnings.append(
+                    "The run ran out of time before site-based keyword ideas could be requested."
+                )
+            else:
+                context.warnings.append(
+                    "The Google Ads budget was spent before site-based keyword ideas "
+                    "could be requested."
+                )
+            if out_of_time:
+                # The expander keeps its own clock and starts it fresh on every
+                # call, so a fallback launched past the ceiling would spend the
+                # budget's whole runtime allowance a second time.
+                context.warnings.append(
+                    "No fallback expansion was attempted, because the run was already out of time."
+                )
+            elif self.seed_keyword is None:
+                context.warnings.append(
+                    "No seed keyword was provided, so no fallback expansion is possible."
+                )
+            elif context.expander is None:
+                # Without this the run reports nothing at all and never says
+                # why: both sources were gone, and only one of them said so.
+                context.warnings.append(
+                    "Autocomplete is unavailable, so no fallback expansion is possible."
+                )
+            else:
                 used.add("autocomplete")
                 try:
                     candidates, expansion = await context.expander.expand(
@@ -517,10 +561,6 @@ class CompetitorResearch:
                                 context.budget_guard.budget.max_autocomplete_queries,
                             ),
                         )
-            elif self.seed_keyword is None:
-                context.warnings.append(
-                    "No seed keyword was provided, so no fallback expansion is possible."
-                )
         notable = (
             max(keywords, key=lambda keyword: keyword.avg_monthly_searches or 0).keyword
             if keywords
@@ -582,6 +622,26 @@ class ExistingSiteResearch:
                 context.errors.append(str(exc))
             else:
                 opportunities = find_opportunities(page.rows, context.settings)
+                if not page.rows:
+                    # Every keyword here grows out of an opportunity, so an
+                    # empty window leaves nothing behind and no trace of why.
+                    # The reason then falls through to whatever else warned --
+                    # usually an absent Google Ads, which had nothing to do
+                    # with it.
+                    context.warnings.append(
+                        "Search Console returned no rows for the requested window."
+                    )
+                elif not opportunities:
+                    # Every keyword this scenario returns comes from an
+                    # opportunity, so a site whose rows all sit outside the
+                    # position window produces nothing -- and without this the
+                    # run reads exactly like a property Search Console had no
+                    # data for. Those are opposite findings: one says widen the
+                    # thresholds, the other says check the property.
+                    context.warnings.append(
+                        f"{len(page.rows)} Search Console rows were read and none met the "
+                        "opportunity thresholds, so no keywords were derived from them."
+                    )
                 for opportunity in _cap(
                     context, opportunities, context.budget_guard.budget.max_keywords
                 ):

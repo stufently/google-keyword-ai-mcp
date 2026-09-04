@@ -75,7 +75,8 @@ like any other. Async rate limiters pace
 single-process calls; Google Ads also uses a file lock and timestamp for a shared
 interprocess limit.
 
-Retries honour a `Retry-After` header, but only up to
+Retries honour a `Retry-After` header in either form the standard allows -- a
+delay in seconds or an HTTP-date -- but only up to
 `http_max_retry_after_seconds` (60 by default). A longer wait is a quota to come
 back for rather than a retry: sleeping it out would run straight through the
 budget's runtime ceiling with nothing on screen, so the request fails instead and

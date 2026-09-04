@@ -112,6 +112,17 @@ def _run_trends(
         engine.dispose()
 
     data = TrendsData(provider=provider_info, result=result)
+    if not _carries_data(result):
+        # Nothing came back at all. A failed widget is why, when there was one:
+        # calling that `partial` would promise data the payload does not hold,
+        # and the flat "no trend data" would read as Google's verdict on the
+        # keyword rather than as a request that never landed.
+        return Envelope(
+            data=data,
+            warnings=warnings,
+            completeness=Completeness.EMPTY,
+            completeness_reason=warnings[0] if warnings else "no trend data",
+        )
     if warnings:
         return Envelope(
             data=data,
@@ -119,13 +130,20 @@ def _run_trends(
             completeness=Completeness.PARTIAL,
             completeness_reason="one or more trend widgets failed",
         )
-    if not result.timeline:
-        return Envelope(
-            data=data,
-            completeness=Completeness.EMPTY,
-            completeness_reason="no trend data",
-        )
     return Envelope(data=data)
+
+
+def _carries_data(result: TrendsResult) -> bool:
+    """Say whether the reply holds any of the three things Trends returns.
+
+    The timeline is the headline, but geography and related queries are answers
+    too, and Google returns them for keywords whose timeline is empty. Judging
+    emptiness on the timeline alone reported `empty` over a payload that had
+    rows in it.
+    """
+    return bool(
+        result.timeline or result.geo_interest or result.related.top or result.related.rising
+    )
 
 
 def run_trends(

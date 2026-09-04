@@ -1,5 +1,7 @@
 import random
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 
 import anyio
 import httpx
@@ -40,6 +42,15 @@ def _details(url: str | httpx.URL, status_code: int | None) -> dict[str, object]
 
 
 def _retry_after(response: httpx.Response) -> float | None:
+    """Read `Retry-After` in either form the standard allows.
+
+    RFC 9110 lets the header carry a delay in seconds or an HTTP-date, and
+    Google's front ends send both. Reading only the numeric form dropped the
+    date silently: the run backed off for a second instead of the day it was
+    told to wait, and the ceiling that turns a long wait into a reported quota
+    never saw it. A date already in the past means "now", not a negative delay --
+    clock skew and a slow hop both produce one.
+    """
     if response.status_code not in {429, 503}:
         return None
     value = response.headers.get("Retry-After")
@@ -48,8 +59,19 @@ def _retry_after(response: httpx.Response) -> float | None:
     try:
         seconds = float(value)
     except ValueError:
-        return None
+        return _retry_after_date(value)
     return seconds if seconds >= 0 else None
+
+
+def _retry_after_date(value: str) -> float | None:
+    try:
+        deadline = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if deadline.tzinfo is None:
+        # RFC 9110 dates are GMT; a sender that omits the zone still means it.
+        deadline = deadline.replace(tzinfo=UTC)
+    return max(0.0, (deadline - datetime.now(UTC)).total_seconds())
 
 
 async def request_with_retries(

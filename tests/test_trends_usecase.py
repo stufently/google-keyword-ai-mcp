@@ -17,7 +17,7 @@ from google_keyword_ai.providers.trends.provider import GoogleTrendsProvider
 from google_keyword_ai.usecases import trends as trends_usecase
 
 
-def result_for(keywords: list[str], *, timeline: bool = True) -> TrendsResult:
+def result_for(keywords: list[str], *, timeline: bool = True, geo: bool = True) -> TrendsResult:
     return TrendsResult(
         keywords=keywords,
         geo="US",
@@ -40,14 +40,18 @@ def result_for(keywords: list[str], *, timeline: bool = True) -> TrendsResult:
             if timeline
             else []
         ),
-        geo_interest=[
-            GeoInterest(
-                geo_code="US-CA",
-                geo_name="California",
-                values=[100],
-                has_data=[True],
-            )
-        ],
+        geo_interest=(
+            [
+                GeoInterest(
+                    geo_code="US-CA",
+                    geo_name="California",
+                    values=[100],
+                    has_data=[True],
+                )
+            ]
+            if geo
+            else []
+        ),
         retrieved_at=datetime(2026, 9, 2, tzinfo=UTC),
         source="https://trends.google.com/trends/api/explore",
     )
@@ -87,11 +91,11 @@ def test_partial_widget_result_has_warning(tmp_path: Path, monkeypatch: pytest.M
     assert envelope.data.result.timeline
 
 
-def test_empty_timeline_without_errors_is_empty(
+def test_a_reply_with_nothing_in_it_is_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def empty(*_args: object, **_kwargs: object) -> object:
-        return provider_info(), result_for(["keyword"], timeline=False), []
+        return provider_info(), result_for(["keyword"], timeline=False, geo=False), []
 
     monkeypatch.setattr(trends_usecase, "_fetch_trends", empty)
 
@@ -100,6 +104,56 @@ def test_empty_timeline_without_errors_is_empty(
     assert envelope.completeness is Completeness.EMPTY
     assert envelope.completeness_reason == "no trend data"
     assert envelope.errors == []
+
+
+def test_geography_without_a_timeline_is_still_data(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`empty` over a payload with rows in it is a false statement about the payload.
+
+    The timeline is the headline of a Trends answer, but geography and related
+    queries are answers too, and Google returns them for keywords whose timeline
+    is empty. Reading emptiness off the timeline alone told the caller there was
+    nothing while handing them a region list.
+    """
+
+    async def geo_only(*_args: object, **_kwargs: object) -> object:
+        return provider_info(), result_for(["keyword"], timeline=False), []
+
+    monkeypatch.setattr(trends_usecase, "_fetch_trends", geo_only)
+
+    envelope = trends_usecase.run_trends(Settings(data_dir=tmp_path), "keyword")
+
+    assert envelope.data.result.geo_interest, "the fixture is only useful if it has rows"
+    assert envelope.completeness is Completeness.COMPLETE
+    assert envelope.completeness_reason is None
+
+
+def test_a_total_widget_outage_is_empty_and_says_which_widget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing came back, so `partial` would promise data the payload lacks.
+
+    `partial` was reported for any warning at all, including the case where
+    every widget failed and the result held nothing. And the reason has to be
+    the widget failure, not the flat "no trend data" -- that reads as Google's
+    verdict on the keyword rather than as a request that never landed.
+    """
+
+    async def outage(*_args: object, **_kwargs: object) -> object:
+        return (
+            provider_info(),
+            result_for(["keyword"], timeline=False, geo=False),
+            ["TIMESERIES: rate limited", "GEO_MAP: rate limited"],
+        )
+
+    monkeypatch.setattr(trends_usecase, "_fetch_trends", outage)
+
+    envelope = trends_usecase.run_trends(Settings(data_dir=tmp_path), "keyword")
+
+    assert envelope.completeness is Completeness.EMPTY
+    assert envelope.completeness_reason == "TIMESERIES: rate limited"
+    assert envelope.warnings == ["TIMESERIES: rate limited", "GEO_MAP: rate limited"]
 
 
 def test_normalization_scope_is_stable_and_query_specific() -> None:

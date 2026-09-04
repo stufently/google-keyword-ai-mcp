@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 from pathlib import Path
 
 import anyio
@@ -221,3 +223,74 @@ def test_a_wait_within_the_ceiling_is_still_honoured(
         anyio.run(request)
 
     assert sleeps == [30.0]
+
+
+def test_a_retry_after_date_is_honoured_like_a_delay(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path
+) -> None:
+    """`Retry-After` carries either a delay or a date, and both are instructions.
+
+    RFC 9110 allows an HTTP-date, and Google's front ends send one. Reading only
+    the numeric form dropped the header silently: the run backed off for a
+    second instead of the day it was told to wait, and the ceiling that exists
+    to turn a long wait into a reported quota never saw it either.
+    """
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(anyio, "sleep", fake_sleep)
+    settings = Settings(
+        data_dir=data_dir,
+        http_max_attempts=3,
+        http_max_retry_after_seconds=60,
+    )
+    tomorrow = format_datetime(datetime.now(UTC) + timedelta(days=1), usegmt=True)
+
+    async def request() -> None:
+        async with httpx.AsyncClient() as client:
+            await request_with_retries(client, "GET", URL, params={}, settings=settings)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(URL).mock(return_value=httpx.Response(429, headers={"Retry-After": tomorrow}))
+        with pytest.raises(RateLimitError) as raised:
+            anyio.run(request)
+
+    assert sleeps == [], "the run must not sleep for a day, and must not ignore the date either"
+    retry_after = raised.value.details["retry_after"]
+    assert isinstance(retry_after, float)
+    assert retry_after > 86000
+
+
+def test_a_retry_after_date_already_past_waits_no_time(
+    monkeypatch: pytest.MonkeyPatch, data_dir: Path
+) -> None:
+    """A date that has already gone by says "now", not a negative delay.
+
+    Clock skew and a slow hop both produce one, and the header still has to read
+    as an instruction to retry rather than as a value to discard.
+    """
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(anyio, "sleep", fake_sleep)
+    settings = Settings(data_dir=data_dir, http_max_attempts=2, http_backoff_base_seconds=99)
+    yesterday = format_datetime(datetime.now(UTC) - timedelta(days=1), usegmt=True)
+
+    async def request() -> None:
+        async with httpx.AsyncClient() as client:
+            await request_with_retries(client, "GET", URL, params={}, settings=settings)
+
+    with respx.mock(assert_all_called=True) as router:
+        router.get(URL).mock(
+            side_effect=[
+                httpx.Response(429, headers={"Retry-After": yesterday}),
+                httpx.Response(200),
+            ]
+        )
+        anyio.run(request)
+
+    assert sleeps == [0.0], "a past date is an immediate retry, not the backoff it replaced"

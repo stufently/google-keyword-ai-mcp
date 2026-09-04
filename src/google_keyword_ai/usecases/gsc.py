@@ -411,9 +411,20 @@ def run_gsc_opportunities(
             completeness_reason=reason,
         )
     if not opportunities:
+        # Two very different findings end here, and only one of them is about
+        # the property. Rows that met no threshold mean the site has traffic and
+        # nothing in it is an opportunity by the configured criteria -- those
+        # criteria travel in the same payload, so the reader can widen them.
+        # Calling that "no search analytics data" sends them to look for a
+        # broken property instead.
+        reason = (
+            "no search analytics data"
+            if not page.rows
+            else (f"{len(page.rows)} rows were read and none met the opportunity thresholds")
+        )
         return Envelope(
             data=data,
             completeness=Completeness.EMPTY,
-            completeness_reason="no search analytics data",
+            completeness_reason=reason,
         )
     return Envelope(data=data)

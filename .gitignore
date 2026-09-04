@@ -8,3 +8,5 @@ dist/
 build/
 .venv/
 .uv-cache/
+.uv-cache-312/
+.coverage

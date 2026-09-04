@@ -57,10 +57,11 @@ class FakeExpander:
 
 
 class FakeAds:
-    def __init__(self, log: list[str]) -> None:
+    def __init__(self, log: list[str], ideas: list[KeywordIdea] | None = None) -> None:
         self.log = log
         self.batches: list[list[str]] = []
         self.seeds: list[AdsSeed] = []
+        self.ideas = ideas
 
     async def keyword_ideas(
         self,
@@ -72,6 +73,8 @@ class FakeAds:
         del market, include_adult
         self.log.append("ads_ideas")
         self.seeds.append(seed)
+        if self.ideas is not None:
+            return self.ideas
         return [
             KeywordIdea(
                 text="competitor keyword",
@@ -119,8 +122,9 @@ class FakeTrends:
 
 
 class FakeGsc:
-    def __init__(self, log: list[str]) -> None:
+    def __init__(self, log: list[str], rows: list[SearchAnalyticsRow] | None = None) -> None:
         self.log = log
+        self.rows = rows
 
     async def query(
         self,
@@ -147,16 +151,17 @@ class FakeGsc:
             dimension_filters,
         )
         self.log.append("gsc")
+        default = [
+            SearchAnalyticsRow(
+                keys={"query": "existing keyword", "page": "/page"},
+                clicks=5,
+                impressions=500,
+                ctr=0.01,
+                position=8.0,
+            )
+        ]
         return SearchAnalyticsPage(
-            rows=[
-                SearchAnalyticsRow(
-                    keys={"query": "existing keyword", "page": "/page"},
-                    clicks=5,
-                    impressions=500,
-                    ctr=0.01,
-                    position=8.0,
-                )
-            ],
+            rows=default if self.rows is None else self.rows,
             truncated=False,
             truncation_reason=None,
         )
@@ -514,5 +519,158 @@ def test_skipped_autocomplete_requests_reach_the_research_warnings(settings: Set
         await NewNicheResearch("seed").run(context)
 
         assert any("2 of 3 Autocomplete requests failed" in warning for warning in context.warnings)
+
+    anyio.run(exercise)
+
+
+def test_site_rows_that_met_no_threshold_say_so(settings: Settings) -> None:
+    """A site with traffic and no opportunities has to say which of the two it is.
+
+    Every keyword the site scenario returns comes from an opportunity, so a site
+    whose rows all sit outside the position window produces nothing — and the
+    run then reads exactly like a property Search Console had no data for at
+    all. Those are opposite findings: one says widen the thresholds, the other
+    says check the property.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        rows = [
+            SearchAnalyticsRow(
+                keys={"query": "brand", "page": "/"},
+                clicks=900,
+                impressions=1000,
+                ctr=0.9,
+                position=1.1,
+            )
+        ]
+        context = _context(settings, log=log, gsc=FakeGsc(log, rows=rows))
+        data = await ExistingSiteResearch("https://example.com/").run(context)
+
+        assert data.keywords == []
+        assert any("threshold" in warning for warning in context.warnings), context.warnings
+
+    anyio.run(exercise)
+
+
+def test_competitor_falls_back_to_expansion_when_ads_is_gone(settings: Settings) -> None:
+    """With a seed keyword and no Google Ads, Autocomplete is the fallback.
+
+    This whole branch was unexercised: the competitor scenario is the one that
+    normally never touches Autocomplete, so nothing pinned what it does when the
+    only paid source is missing and a seed was supplied to work from.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        expander = FakeExpander(log, _candidates(3))
+        context = _context(settings, log=log, expander=expander)
+        data = await CompetitorResearch("example.com", seed_keyword="seed").run(context)
+
+        assert [keyword.keyword for keyword in data.keywords] == [
+            candidate.raw for candidate in _candidates(3)
+        ]
+        assert context.budget_guard.spend.autocomplete_queries > 0
+        assert any("Google Ads is unavailable" in warning for warning in context.warnings)
+
+    anyio.run(exercise)
+
+
+def test_competitor_says_which_source_was_missing(settings: Settings) -> None:
+    """An empty answer names what produced it, and there are three ways here.
+
+    Ads gone with no seed, ads gone with a seed but no Autocomplete to expand
+    it, and ads present but out of budget. The middle one used to warn about
+    nothing at all, and the last one blamed an unavailable provider for a number
+    the caller chose.
+    """
+
+    async def exercise() -> None:
+        no_seed = _context(settings, log=[])
+        await CompetitorResearch("example.com").run(no_seed)
+        assert any("no fallback" in warning for warning in no_seed.warnings)
+
+        no_expander = _context(settings, log=[])
+        await CompetitorResearch("example.com", seed_keyword="seed").run(no_expander)
+        assert any("Autocomplete is unavailable" in w for w in no_expander.warnings), (
+            no_expander.warnings
+        )
+
+        log: list[str] = []
+        spent = _context(
+            settings,
+            log=log,
+            ads=FakeAds(log),
+            budget=Budget(max_ads_calls=1, max_keywords=10, max_trends_calls=1),
+        )
+        spent.budget_guard.spend("ads")
+        await CompetitorResearch("example.com").run(spent)
+        assert any("budget was spent" in warning for warning in spent.warnings), spent.warnings
+        assert not any("Google Ads is unavailable" in w for w in spent.warnings)
+
+    anyio.run(exercise)
+
+
+def test_an_answer_of_nothing_is_never_left_unexplained(settings: Settings) -> None:
+    """Every source that succeeded and returned nothing has to say so itself.
+
+    Otherwise the empty run is explained by whatever warning happens to be
+    nearby — normally an absent Google Ads, which in three of these four cases
+    had nothing to do with it.
+    """
+
+    async def exercise() -> None:
+        ads_log: list[str] = []
+        ads_context = _context(settings, log=ads_log, ads=FakeAds(ads_log, ideas=[]))
+        ads_data = await CompetitorResearch("example.com").run(ads_context)
+        assert ads_data.keywords == []
+        assert any("returned no keyword ideas" in w for w in ads_context.warnings), (
+            ads_context.warnings
+        )
+
+        niche_log: list[str] = []
+        niche_context = _context(settings, log=niche_log, expander=FakeExpander(niche_log, []))
+        niche_data = await NewNicheResearch("seed").run(niche_context)
+        assert niche_data.keywords == []
+        assert any("no usable keywords" in w for w in niche_context.warnings), (
+            niche_context.warnings
+        )
+
+        site_log: list[str] = []
+        site_context = _context(settings, log=site_log, gsc=FakeGsc(site_log, rows=[]))
+        site_data = await ExistingSiteResearch("https://example.com/").run(site_context)
+        assert site_data.keywords == []
+        assert any("no rows" in warning for warning in site_context.warnings), site_context.warnings
+
+    anyio.run(exercise)
+
+
+def test_a_run_out_of_time_does_not_start_the_clock_again(settings: Settings) -> None:
+    """The expander keeps its own clock and starts it fresh on every call.
+
+    `can_spend` refuses on a spent runtime as readily as on a spent count, so a
+    competitor run past its ceiling took the same branch as one that had merely
+    used its Ads allowance — and launched a fallback expansion entitled to the
+    whole runtime budget a second time. The two also call for different actions,
+    so they must not share a warning.
+    """
+
+    async def exercise() -> None:
+        log: list[str] = []
+        expander = FakeExpander(log, _candidates(3))
+        context = _context(
+            settings,
+            log=log,
+            ads=FakeAds(log),
+            expander=expander,
+            budget=Budget(max_runtime_seconds=0.001, max_keywords=10, max_trends_calls=1),
+        )
+        await anyio.sleep(0.01)
+        data = await CompetitorResearch("example.com", seed_keyword="seed").run(context)
+
+        assert "autocomplete" not in log, "the fallback restarted a clock that had run out"
+        assert data.keywords == []
+        assert any("ran out of time" in warning for warning in context.warnings), context.warnings
+        assert not any("budget was spent" in warning for warning in context.warnings)
 
     anyio.run(exercise)
