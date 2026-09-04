@@ -19,8 +19,30 @@ from google_keyword_ai.storage.engine import open_database
 _AUTOCOMPLETE_ENDPOINTS = {PRIMARY_ENDPOINT, FALLBACK_ENDPOINT}
 
 
-def _contains_cyrillic(text: str) -> bool:
-    return any(unicodedata.name(character, "").startswith("CYRILLIC") for character in text)
+def _cyrillic_count(texts: list[str]) -> int:
+    return sum(
+        any(unicodedata.name(character, "").startswith("CYRILLIC") for character in text)
+        for text in texts
+    )
+
+
+async def _suggest(tmp_path: Path, query: str, language: str, country: str) -> list[str]:
+    """Ask Google once, through the provider, and return the suggestion texts."""
+    settings = Settings(data_dir=tmp_path)
+    engine = open_database(settings)
+    try:
+        async with build_client(settings, accept_language=language) as client:
+            provider = AutocompleteProvider(
+                settings=settings,
+                client=client,
+                cache=SqliteCache(engine, settings),
+                rate_limiter=AsyncRateLimiter(2.0),
+            )
+            return [
+                item.text for item in await provider.suggest(query, Market.parse(language, country))
+            ]
+    finally:
+        engine.dispose()
 
 
 @pytest.mark.integration
@@ -48,21 +70,23 @@ async def test_autocomplete_answers_a_live_query(tmp_path: Path) -> None:
 @pytest.mark.integration
 @pytest.mark.anyio
 async def test_autocomplete_follows_the_requested_market(tmp_path: Path) -> None:
-    settings = Settings(data_dir=tmp_path)
-    engine = open_database(settings)
-    try:
-        async with build_client(settings, accept_language="ru") as client:
-            provider = AutocompleteProvider(
-                settings=settings,
-                client=client,
-                cache=SqliteCache(engine, settings),
-                rate_limiter=AsyncRateLimiter(2.0),
-            )
-            suggestions = await provider.suggest("кофе", Market.parse("ru", "RU"))
-        assert suggestions
-        assert any(_contains_cyrillic(item.text) for item in suggestions)
-    finally:
-        engine.dispose()
+    """The same script-neutral query, asked of two markets, must answer differently.
+
+    A Cyrillic query would prove nothing: Google completes `кофе` in Cyrillic
+    whatever `hl` and `gl` say, so the assertion held even with the market
+    hard-wired to en/US — verified by mutation. `google` is Latin and neutral,
+    and there the market shows: en/US came back with no Cyrillic suggestion at
+    all while ru/RU came back with four. Comparing the two counts rather than
+    demanding an exact one keeps the test honest as live results drift.
+    """
+    english = await _suggest(tmp_path / "en", "google", "en", "US")
+    russian = await _suggest(tmp_path / "ru", "google", "ru", "RU")
+
+    assert english and russian
+    assert _cyrillic_count(russian) >= 1
+    assert _cyrillic_count(russian) > _cyrillic_count(english), (
+        "the two markets answered the same neutral query identically"
+    )
 
 
 @pytest.mark.integration
