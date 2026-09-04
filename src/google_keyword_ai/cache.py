@@ -48,6 +48,7 @@ class SqliteCache:
         self._engine = engine
         self._settings = settings
         self._sweep_attempted = False
+        self._bytes_since_eviction = 0
 
     def get(self, key: str) -> bytes | None:
         if not self._settings.cache_enabled:
@@ -69,6 +70,14 @@ class SqliteCache:
                     (key, expires_at),
                 )
             return None
+        try:
+            with self._engine.begin() as connection:
+                connection.exec_driver_sql(
+                    "UPDATE cache_entries SET last_read_at = ? WHERE key = ?",
+                    (now.isoformat(), key),
+                )
+        except SQLAlchemyError as exc:
+            logger.warning("cache_touch_failed", error=str(exc))
         return bytes(payload)
 
     @staticmethod
@@ -122,6 +131,41 @@ class SqliteCache:
             result = connection.exec_driver_sql("DELETE FROM cache_entries")
         return result.rowcount
 
+    def evict_over_limit(self) -> int:
+        max_bytes = self._settings.cache_max_bytes
+        if max_bytes == 0:
+            return 0
+
+        with self._engine.connect() as connection:
+            rows = connection.exec_driver_sql(
+                """
+                SELECT key, last_read_at, length(payload)
+                FROM cache_entries
+                ORDER BY last_read_at ASC
+                """
+            ).all()
+
+        remaining_bytes = sum(int(payload_bytes) for _, _, payload_bytes in rows)
+        eviction_candidates: list[tuple[str, str | None]] = []
+        for key, last_read_at, payload_bytes in rows:
+            if remaining_bytes <= max_bytes:
+                break
+            eviction_candidates.append(
+                (str(key), None if last_read_at is None else str(last_read_at))
+            )
+            remaining_bytes -= int(payload_bytes)
+
+        removed = 0
+        for offset in range(0, len(eviction_candidates), _PURGE_BATCH_SIZE):
+            batch = eviction_candidates[offset : offset + _PURGE_BATCH_SIZE]
+            with self._engine.begin() as connection:
+                result = connection.exec_driver_sql(
+                    "DELETE FROM cache_entries WHERE key = ? AND last_read_at IS ?",
+                    batch,
+                )
+            removed += result.rowcount
+        return removed
+
     def counts(self) -> CacheCounts:
         now = datetime.now(UTC)
         with self._engine.connect() as connection:
@@ -160,16 +204,22 @@ class SqliteCache:
                 self.purge_expired()
             except SQLAlchemyError as exc:
                 logger.warning("cache_sweep_failed", error=str(exc))
+            try:
+                self.evict_over_limit()
+            except SQLAlchemyError as exc:
+                logger.warning("cache_eviction_failed", error=str(exc))
+            self._bytes_since_eviction = 0
 
         created_at = datetime.now(UTC)
+        created_at_text = created_at.isoformat()
         expires_at = None if ttl_seconds is None else created_at + timedelta(seconds=ttl_seconds)
         with self._engine.begin() as connection:
             connection.exec_driver_sql(
                 """
                 INSERT INTO cache_entries (
                     key, provider, endpoint, account_scope, parser_version,
-                    payload, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    payload, created_at, expires_at, last_read_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     provider = excluded.provider,
                     endpoint = excluded.endpoint,
@@ -177,7 +227,8 @@ class SqliteCache:
                     parser_version = excluded.parser_version,
                     payload = excluded.payload,
                     created_at = excluded.created_at,
-                    expires_at = excluded.expires_at
+                    expires_at = excluded.expires_at,
+                    last_read_at = excluded.last_read_at
                 """,
                 (
                     key,
@@ -186,7 +237,17 @@ class SqliteCache:
                     account_scope,
                     parser_version,
                     payload,
-                    created_at.isoformat(),
+                    created_at_text,
                     None if expires_at is None else expires_at.isoformat(),
+                    created_at_text,
                 ),
             )
+
+        self._bytes_since_eviction += len(payload)
+        slack = max(1, self._settings.cache_max_bytes // 100)
+        if self._settings.cache_sweep_enabled and self._bytes_since_eviction >= slack:
+            try:
+                self.evict_over_limit()
+            except SQLAlchemyError as exc:
+                logger.warning("cache_eviction_failed", error=str(exc))
+            self._bytes_since_eviction = 0

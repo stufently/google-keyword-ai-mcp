@@ -41,7 +41,17 @@ class Settings(BaseSettings):
     trends_circuit_breaker_failures: int = 3
     trends_timezone_minutes: int = -180
     cache_enabled: bool = True
-    cache_sweep_enabled: bool = True
+    cache_sweep_enabled: bool = Field(
+        default=True,
+        description="Automatically purge expired entries and evict least-recently-read entries.",
+    )
+    cache_max_bytes: int = Field(
+        default=536870912,
+        description=(
+            "Maximum sum of cached payload bytes; 0 disables the limit. "
+            "This is not the database file size, which also includes saved run history."
+        ),
+    )
     google_ads_developer_token: SecretStr | None = None
     google_ads_customer_id: str | None = None
     google_ads_login_customer_id: str | None = None
@@ -109,6 +119,13 @@ class Settings(BaseSettings):
     def validate_positive_ttl(cls, value: int) -> int:
         if value <= 0:
             raise InvalidConfigurationError("autocomplete_cache_ttl_seconds must be positive.")
+        return value
+
+    @field_validator("cache_max_bytes")
+    @classmethod
+    def validate_cache_max_bytes(cls, value: int) -> int:
+        if value < 0:
+            raise InvalidConfigurationError("cache_max_bytes must be non-negative.")
         return value
 
     @field_validator("trends_cache_ttl_seconds")

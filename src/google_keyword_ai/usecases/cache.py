@@ -15,11 +15,17 @@ from google_keyword_ai.storage.engine import database_path, open_database
 
 
 class CacheStatusData(BaseModel):
-    """Cache counts and the on-disk size of the whole database, including run history."""
+    """Cache payload usage and whole-database size, including saved run history."""
 
     entries: int
     expired_entries: int
     payload_bytes: int
+    max_bytes: int = Field(
+        description=(
+            "Maximum sum of cached payload bytes; not the database file size, which also "
+            "includes saved run history."
+        )
+    )
     database_bytes: int = Field(
         description="Bytes used by the whole database and sidecars, including saved run history."
     )
@@ -91,6 +97,7 @@ def run_cache_status(settings: Settings) -> Envelope[CacheStatusData | None]:
             entries=counts.entries,
             expired_entries=counts.expired_entries,
             payload_bytes=counts.payload_bytes,
+            max_bytes=settings.cache_max_bytes,
             database_bytes=size,
         )
     )

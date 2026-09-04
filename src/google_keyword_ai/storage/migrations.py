@@ -5,7 +5,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from google_keyword_ai.errors import InvalidConfigurationError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _migration_1(connection: Connection) -> None:
@@ -79,7 +79,20 @@ def _migration_3(connection: Connection) -> None:
     connection.exec_driver_sql("ALTER TABLE runs ADD COLUMN result_limit INTEGER")
 
 
-MIGRATIONS: list[Callable[[Connection], None]] = [_migration_1, _migration_2, _migration_3]
+def _migration_4(connection: Connection) -> None:
+    connection.exec_driver_sql("ALTER TABLE cache_entries ADD COLUMN last_read_at TEXT")
+    connection.exec_driver_sql("UPDATE cache_entries SET last_read_at = created_at")
+    connection.exec_driver_sql(
+        "CREATE INDEX ix_cache_entries_last_read_at ON cache_entries (last_read_at)"
+    )
+
+
+MIGRATIONS: list[Callable[[Connection], None]] = [
+    _migration_1,
+    _migration_2,
+    _migration_3,
+    _migration_4,
+]
 
 
 def _validate_schema_version(connection: Connection) -> int:

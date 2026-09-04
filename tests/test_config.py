@@ -96,6 +96,15 @@ def test_cache_sweep_default() -> None:
     assert Settings().cache_sweep_enabled is True
 
 
+def test_cache_size_limit_default() -> None:
+    assert Settings().cache_max_bytes == 536870912
+
+
+def test_cache_size_limit_rejects_negative_values() -> None:
+    with pytest.raises(InvalidConfigurationError, match="cache_max_bytes"):
+        Settings(cache_max_bytes=-1)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

@@ -88,6 +88,16 @@ def test_cache_status_reports_database_counts(
         holding_engine.dispose()
 
 
+def test_cache_status_reports_max_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = Settings(data_dir=tmp_path / "status-limit", cache_max_bytes=123456)
+
+    result = _invoke(settings, monkeypatch, ["cache", "status", "--format", "json"])
+
+    assert result.exit_code == 0, result.output
+    envelope = json.loads(result.stdout)
+    assert envelope["data"]["max_bytes"] == 123456
+
+
 @pytest.mark.parametrize(
     ("args", "remaining_cache"),
     [

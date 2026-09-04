@@ -48,11 +48,15 @@ gkai cache purge
 gkai cache purge --all --vacuum
 ```
 
-`gkai cache status` reports total and expired entry counts, cached payload bytes,
-and `database_bytes`. The latter is the size of the whole SQLite database and its
-sidecars, including saved run history; it is not the cache size. `gkai cache purge`
-removes expired entries by default. `--all` removes every cache entry, and `--vacuum`
-also reclaims unused database pages. These commands do not delete saved runs.
+`gkai cache status` reports total and expired entry counts, cached `payload_bytes`,
+the configured `max_bytes`, and `database_bytes`. `max_bytes` limits the sum of
+cached payload lengths, not the SQLite file: `database_bytes` is the size of the
+whole database and its sidecars, including saved run history. The default limit is
+512 MiB (`GKAI_CACHE_MAX_BYTES=536870912`); zero disables size eviction.
+`GKAI_CACHE_SWEEP_ENABLED` controls both automatic expired-entry sweeping and LRU
+size eviction. `gkai cache purge` removes expired entries by default. `--all`
+removes every cache entry, and `--vacuum` also reclaims unused database pages.
+These commands do not delete saved runs.
 
 ## Discovery and expansion
 

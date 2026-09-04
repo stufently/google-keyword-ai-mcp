@@ -130,6 +130,65 @@ def test_v2_run_rows_survive_the_upgrade_and_read_back_without_a_request(tmp_pat
         engine.dispose()
 
 
+def test_version_3_cache_rows_receive_last_read_at_backfill(tmp_path: Path) -> None:
+    engine = create_engine_for(Settings(data_dir=tmp_path / "v3-cache"))
+    try:
+        _upgrade_to(engine, 3)
+        rows = [
+            (
+                "first",
+                "fake",
+                "/v1",
+                "",
+                "1",
+                b"short",
+                "2026-09-02T00:00:00+00:00",
+                None,
+            ),
+            (
+                "second",
+                "fake",
+                "/v1",
+                "",
+                "1",
+                b"a longer payload",
+                "2026-09-03T00:00:00+00:00",
+                "2026-09-04T00:00:00+00:00",
+            ),
+        ]
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                """
+                INSERT INTO cache_entries (
+                    key, provider, endpoint, account_scope, parser_version,
+                    payload, created_at, expires_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+
+        assert apply_migrations(engine) == 4
+        with engine.connect() as connection:
+            upgraded = [
+                tuple(row)
+                for row in connection.exec_driver_sql(
+                    """
+                    SELECT key, created_at, last_read_at, length(payload)
+                    FROM cache_entries ORDER BY key
+                    """
+                ).all()
+            ]
+            version = connection.exec_driver_sql("PRAGMA user_version").scalar_one()
+
+        assert version == 4
+        assert upgraded == [
+            ("first", rows[0][6], rows[0][6], len(rows[0][5])),
+            ("second", rows[1][6], rows[1][6], len(rows[1][5])),
+        ]
+    finally:
+        engine.dispose()
+
+
 def test_migrations_are_idempotent(tmp_path: Path) -> None:
     engine = create_engine_for(Settings(data_dir=tmp_path / "idempotent"))
     try:
