@@ -34,7 +34,13 @@ from google_keyword_ai.storage.engine import open_database
 from google_keyword_ai.usecases import research as research_module
 from google_keyword_ai.usecases import runs as runs_module
 from google_keyword_ai.usecases.research import run_research
-from google_keyword_ai.usecases.runs import run_export, run_rerun, run_resume, run_show
+from google_keyword_ai.usecases.runs import (
+    run_export,
+    run_list,
+    run_rerun,
+    run_resume,
+    run_show,
+)
 
 
 def _data() -> ResearchData:
@@ -461,7 +467,7 @@ def test_research_save_run_sets_id_and_without_save_run_stores_nothing(
     assert unsaved.run_id is None
     engine = open_database(settings)
     try:
-        assert RunStore(engine).list() == []
+        assert RunStore(engine).list() == ([], [])
     finally:
         engine.dispose()
 
@@ -470,7 +476,7 @@ def test_research_save_run_sets_id_and_without_save_run_stores_nothing(
     assert saved.run_id is not None
     engine = open_database(settings)
     try:
-        records = RunStore(engine).list()
+        records, _ = RunStore(engine).list()
         assert [record.run_id for record in records] == [saved.run_id]
     finally:
         engine.dispose()
@@ -509,3 +515,33 @@ def test_saved_run_never_stores_a_secret_from_the_real_research_path(
 
     assert secret not in stored
     assert json.loads(stored)["google_ads_developer_token"] == "***"
+
+
+def test_listing_runs_reports_the_ones_it_could_not_read(tmp_path: Path) -> None:
+    """A history with one damaged row is partial, not a crash and not a lie.
+
+    The readable runs are still the answer, so they are returned; the damaged
+    one is named in the envelope, because the listing is where a caller goes to
+    find the run to delete and a count would give them nothing to act on.
+    """
+    settings = Settings(data_dir=tmp_path / "listing")
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        healthy = _completed_record(settings)
+        damaged = _completed_record(settings)
+        store.create(healthy)
+        store.create(damaged)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE runs SET config_snapshot = ? WHERE run_id = ?",
+                ("{not json", damaged.run_id),
+            )
+    finally:
+        engine.dispose()
+
+    envelope = run_list(settings)
+
+    assert [record.run_id for record in envelope.data] == [healthy.run_id]
+    assert envelope.completeness is Completeness.PARTIAL
+    assert damaged.run_id in (envelope.completeness_reason or "")

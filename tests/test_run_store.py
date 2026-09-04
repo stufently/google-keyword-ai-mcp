@@ -66,7 +66,9 @@ def test_create_get_list_upsert_and_delete(tmp_path: Path) -> None:
         store.create(newer)
 
         assert store.get(older.run_id) == older
-        assert [record.run_id for record in store.list()] == [newer.run_id, older.run_id]
+        records, unreadable = store.list()
+        assert [record.run_id for record in records] == [newer.run_id, older.run_id]
+        assert unreadable == []
 
         completed = older.stages[0].model_copy(
             update={
@@ -124,3 +126,59 @@ def test_atomic_completed_stage_requires_checkpoint(tmp_path: Path) -> None:
         assert saved.stages[0].checkpoint is None
     finally:
         engine.dispose()
+
+
+def test_a_damaged_run_row_is_reported_instead_of_crashing(tmp_path: Path) -> None:
+    """A row that cannot be parsed is a refusal, not a traceback.
+
+    Four of a run's columns hold JSON and two hold enumerations, all read back
+    without conversion. A damaged one raises `JSONDecodeError` or
+    `ValidationError` -- both `ValueError`, neither a `GkaiError` -- so `run
+    show` on a damaged run printed a traceback where every other unreadable
+    stored value in this project produces an envelope.
+    """
+    settings = Settings(data_dir=tmp_path / "damaged")
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        record = _record(settings=settings)
+        store.create(record)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE runs SET budget = ? WHERE run_id = ?", ("{not json", record.run_id)
+            )
+
+        with pytest.raises(InvalidConfigurationError) as raised:
+            store.get(record.run_id)
+    finally:
+        engine.dispose()
+
+    assert record.run_id in raised.value.message
+
+
+def test_one_damaged_row_does_not_hide_the_rest_of_the_history(tmp_path: Path) -> None:
+    """The listing is where a caller finds the run to delete.
+
+    Letting one damaged row raise would take the whole history down with it, and
+    with it the id of the run that has to go. The readable runs come back, and
+    the unreadable one is named beside them.
+    """
+    settings = Settings(data_dir=tmp_path / "mixed")
+    engine = open_database(settings)
+    try:
+        store = RunStore(engine)
+        healthy = _record(settings=settings, created_at=datetime.now(UTC))
+        damaged = _record(settings=settings, created_at=datetime.now(UTC) - timedelta(hours=1))
+        store.create(healthy)
+        store.create(damaged)
+        with engine.begin() as connection:
+            connection.exec_driver_sql(
+                "UPDATE runs SET status = ? WHERE run_id = ?", ("nonsense", damaged.run_id)
+            )
+
+        records, unreadable = store.list()
+    finally:
+        engine.dispose()
+
+    assert [record.run_id for record in records] == [healthy.run_id]
+    assert unreadable == [damaged.run_id]

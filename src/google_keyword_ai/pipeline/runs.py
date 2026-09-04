@@ -148,9 +148,25 @@ class RunStore:
                 """,
                 (run_id,),
             ).all()
-        return self._record_from_rows(row, stage_rows)
+        try:
+            return self._record_from_rows(row, stage_rows)
+        except (ValueError, TypeError) as exc:
+            # Four of a run's columns are JSON and two more are enumerations, all
+            # read back without conversion: a damaged row raises `JSONDecodeError`
+            # or `ValidationError` here, both of them `ValueError` and neither a
+            # `GkaiError`. Escaping, they reach the caller as a crash where every
+            # other unreadable stored value in this project produces an honest
+            # envelope. The run id is named because that is what the caller needs
+            # in order to delete it.
+            raise InvalidConfigurationError(f"Saved run {run_id} could not be read: {exc}") from exc
 
-    def list(self, limit: int = 20) -> list[RunRecord]:
+    def list(self, limit: int = 20) -> tuple[list[RunRecord], list[str]]:
+        """Return the most recent runs, and the ids of any that could not be read.
+
+        One damaged row must not hide the whole history: the listing is exactly
+        the place a caller goes to find the run to delete, so a run it cannot
+        read is reported beside the ones it can rather than in place of them.
+        """
         if limit <= 0:
             raise InvalidConfigurationError("Run list limit must be positive.")
         with self._engine.connect() as connection:
@@ -159,7 +175,18 @@ class RunStore:
                 (limit,),
             ).scalars()
             ids = list(run_ids)
-        return [record for run_id in ids if (record := self.get(run_id)) is not None]
+
+        records: list[RunRecord] = []
+        unreadable: list[str] = []
+        for run_id in ids:
+            try:
+                record = self.get(run_id)
+            except InvalidConfigurationError:
+                unreadable.append(run_id)
+                continue
+            if record is not None:
+                records.append(record)
+        return records, unreadable
 
     def save_stage(self, run_id: str, stage: StageRecord) -> None:
         with self._engine.begin() as connection:

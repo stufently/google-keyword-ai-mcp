@@ -74,9 +74,19 @@ def run_show(settings: Settings, run_id: str) -> Envelope[RunRecord | None]:
 def run_list(settings: Settings, *, limit: int = 20) -> Envelope[list[RunRecord]]:
     engine = open_database(settings)
     try:
-        records = RunStore(engine).list(limit=limit)
+        records, unreadable = RunStore(engine).list(limit=limit)
     finally:
         engine.dispose()
+    if unreadable:
+        # Named rather than counted: this listing is where a caller goes to find
+        # the run to delete, and a count gives them nothing to act on.
+        reason = f"{len(unreadable)} saved run(s) could not be read: {', '.join(unreadable)}."
+        return Envelope(
+            data=records,
+            warnings=[reason],
+            completeness=Completeness.PARTIAL,
+            completeness_reason=reason,
+        )
     return Envelope(data=records)
 
 
