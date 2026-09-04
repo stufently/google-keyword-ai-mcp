@@ -22,6 +22,7 @@ from google_keyword_ai.opportunities import Opportunity
 from google_keyword_ai.pipeline.budget import BudgetSpend
 from google_keyword_ai.pipeline.models import (
     DataQuality,
+    DryRunPlan,
     ResearchData,
     ResearchKeyword,
     ResearchStats,
@@ -769,6 +770,31 @@ def test_analysis_commands_are_registered() -> None:
     assert CliRunner().invoke(cli_main.app, ["keyword", "--help"]).exit_code == 0
 
 
+def _research_payload() -> ResearchData:
+    return ResearchData(
+        scenario="topic",
+        input="alpha",
+        language="en",
+        country="US",
+        keywords=[
+            ResearchKeyword(
+                keyword="alpha keyword tool",
+                normalized="alpha keyword tool",
+                discovered_from=["autocomplete"],
+            )
+        ],
+        stats=ResearchStats(spend=BudgetSpend()),
+        data_quality=DataQuality(
+            sources=[SourceUsage(name="autocomplete", used=True, available=True, detail="used")],
+            retrieved_at=datetime.now(UTC),
+            absolute_metrics=[],
+            relative_metrics=[],
+            derived_metrics=[],
+            caveats=["Test caveat."],
+        ),
+    )
+
+
 def test_research_markdown_renders_report(monkeypatch: pytest.MonkeyPatch) -> None:
     now = datetime.now(UTC)
     data = ResearchData(
@@ -799,3 +825,97 @@ def test_research_markdown_renders_report(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.exit_code == 0, result.output
     assert result.output.startswith("# Keyword research\n")
     assert "## Data quality and limitations" in result.output
+
+
+def test_trends_on_the_word_compare_is_not_a_subcommand(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`compare` opens the subcommand only when something follows it.
+
+    A lone `gkai trends compare` is a request for Trends on the word "compare",
+    and the MCP tool answers it as one. The CLI routed it into the comparison
+    with an empty keyword list and refused — the same input succeeding on one
+    facade and failing on the other.
+    """
+    settings = Settings(data_dir=tmp_path / "compare")
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    seen: list[str] = []
+
+    def fake_run_trends(_settings: Settings, keyword: str, **_kwargs: object) -> Envelope[object]:
+        seen.append(keyword)
+        return Envelope(data={"ok": True})
+
+    monkeypatch.setattr(cli_main, "run_trends", fake_run_trends)
+
+    result = CliRunner().invoke(cli_main.app, ["trends", "compare"])
+
+    assert result.exit_code == 0, result.output
+    assert seen == ["compare"]
+
+
+def test_markdown_on_a_dry_run_is_a_refusal_envelope_not_a_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exit 2 promises that nothing ran; by this point the dry run already has.
+
+    A combination of options the command cannot honour is a refusal like any
+    other, so it travels in the envelope and exits 1 — the code the documented
+    contract reserves for a verdict that still prints valid output.
+    """
+    settings = Settings(data_dir=tmp_path / "markdown")
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_main,
+        "run_research",
+        lambda *_args, **_kwargs: Envelope(
+            data=DryRunPlan(
+                scenario="niche",
+                steps=["step"],
+                estimated_autocomplete_queries=1,
+                estimated_ads_calls=0,
+                estimated_trends_calls=0,
+                sources=[],
+            )
+        ),
+    )
+
+    result = CliRunner().invoke(
+        cli_main.app, ["research", "topic", "--dry-run", "--format", "markdown"]
+    )
+
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["completeness"] == "empty"
+    assert "--dry-run" in payload["completeness_reason"]
+
+
+def test_a_markdown_report_still_says_what_was_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The report renders `data` and knows nothing of the envelope around it.
+
+    Exiting 1 behind a document that reads as complete leaves the reason on no
+    channel at all, while the skill's instruction is to tell the user what is
+    absent using `completeness_reason`, `warnings` and `errors`.
+    """
+    settings = Settings(data_dir=tmp_path / "partial")
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(
+        cli_main,
+        "run_research",
+        lambda *_args, **_kwargs: Envelope(
+            data=_research_payload(),
+            warnings=["Google Ads is unavailable; absolute search metrics are omitted."],
+            completeness=Completeness.PARTIAL,
+            completeness_reason="Google Ads is unavailable; absolute search metrics are omitted.",
+        ),
+    )
+
+    result = CliRunner().invoke(cli_main.app, ["research", "topic", "--format", "markdown"])
+
+    assert result.exit_code == 1
+    assert "# Keyword research" in result.stdout
+    diagnosis = json.loads(result.stderr)
+    assert diagnosis["completeness"] == "partial"
+    assert "Google Ads is unavailable" in diagnosis["completeness_reason"]
+    assert diagnosis["warnings"]

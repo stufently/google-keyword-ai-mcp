@@ -10,6 +10,7 @@ from google_keyword_ai.config import Settings, load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.errors import GkaiError
 from google_keyword_ai.logging import configure_logging
+from google_keyword_ai.pipeline.budget import Budget
 from google_keyword_ai.pipeline.models import DryRunPlan, ResearchData
 from google_keyword_ai.scoring import KeywordScore
 from google_keyword_ai.usecases.ads import (
@@ -203,6 +204,29 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             )
         )
 
+    def _budget(
+        max_keywords: int,
+        max_autocomplete_queries: int,
+        max_ads_calls: int,
+        max_trends_calls: int,
+        max_runtime_seconds: float,
+    ) -> Budget:
+        """Build the run's budget from the caller's ceilings.
+
+        The CLI has always exposed these; MCP fell back to the defaults, so an
+        agent driving research over stdio could not cap a run at a minute or two
+        Ads calls the way `gkai research --max-runtime 60` can. `plan_research`
+        computes its estimates straight from the budget, so it could only ever
+        describe the default plan either.
+        """
+        return Budget(
+            max_keywords=max_keywords,
+            max_autocomplete_queries=max_autocomplete_queries,
+            max_ads_calls=max_ads_calls,
+            max_trends_calls=max_trends_calls,
+            max_runtime_seconds=max_runtime_seconds,
+        )
+
     @tool()
     def research_keywords(
         target: str,
@@ -211,7 +235,17 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         country: str | None = None,
         seed_keyword: str | None = None,
         limit: int | None = None,
+        save_run: bool = False,
+        max_keywords: int = 2000,
+        max_autocomplete_queries: int = 500,
+        max_ads_calls: int = 20,
+        max_trends_calls: int = 3,
+        max_runtime_seconds: float = 300.0,
     ) -> Envelope[ResearchData | None]:
+        # `save_run` is what makes the five run-scoped tools reachable at all:
+        # they take a `run_id`, and without this the envelope always carried
+        # `run_id: null`, so an MCP-only caller could never obtain one and every
+        # one of them could only answer "Run <id> was not found."
         envelope = run_research(
             active_settings,
             target,
@@ -219,8 +253,16 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             language=language,
             country=country,
             seed_keyword=seed_keyword,
+            budget=_budget(
+                max_keywords,
+                max_autocomplete_queries,
+                max_ads_calls,
+                max_trends_calls,
+                max_runtime_seconds,
+            ),
             dry_run=False,
             limit=limit,
+            save_run=save_run,
         )
         return _widen(cast(Envelope[ResearchData], envelope))
 
@@ -236,6 +278,11 @@ def build_server(settings: Settings | None = None) -> MCPServer:
         language: str | None = None,
         country: str | None = None,
         seed_keyword: str | None = None,
+        max_keywords: int = 2000,
+        max_autocomplete_queries: int = 500,
+        max_ads_calls: int = 20,
+        max_trends_calls: int = 3,
+        max_runtime_seconds: float = 300.0,
     ) -> Envelope[DryRunPlan | None]:
         envelope = run_research(
             active_settings,
@@ -244,6 +291,13 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             language=language,
             country=country,
             seed_keyword=seed_keyword,
+            budget=_budget(
+                max_keywords,
+                max_autocomplete_queries,
+                max_ads_calls,
+                max_trends_calls,
+                max_runtime_seconds,
+            ),
             dry_run=True,
         )
         return _widen(cast(Envelope[DryRunPlan], envelope))

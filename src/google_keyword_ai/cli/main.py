@@ -9,7 +9,7 @@ import typer
 from google_keyword_ai.clustering import cluster_keywords
 from google_keyword_ai.config import load_settings
 from google_keyword_ai.envelope import Completeness, Envelope
-from google_keyword_ai.errors import GkaiError
+from google_keyword_ai.errors import GkaiError, InvalidConfigurationError
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.logging import configure_logging
 from google_keyword_ai.pipeline.budget import Budget
@@ -200,7 +200,11 @@ def trends(
 ) -> None:
     settings = load_settings()
     configure_logging(settings.log_level)
-    if keywords and keywords[0] == "compare":
+    # `compare` opens the subcommand only when something follows it. A lone
+    # `gkai trends compare` is a request for Trends on the word "compare", and
+    # MCP answers it as one -- the CLI used to refuse, which made the same input
+    # succeed on one facade and fail on the other.
+    if len(keywords) > 1 and keywords[0] == "compare":
         _finish(
             lambda: run_trends_compare(
                 settings,
@@ -412,9 +416,21 @@ def research(
         return
     if output_format is ResearchOutputFormat.MARKDOWN:
         if not isinstance(result.data, ResearchData):
-            raise typer.BadParameter(
-                "Markdown format is available only for a completed research run."
+            # Exit 2 is documented as "the parser rejected the command line;
+            # nothing ran and no envelope was produced", and by this point the
+            # dry run has already run. A combination of options this command
+            # cannot honour is a refusal like any other, so it travels in the
+            # envelope and exits 1.
+            _finish(
+                lambda: _error_envelope(
+                    InvalidConfigurationError(
+                        "Markdown format is available only for a completed research run, "
+                        "not for --dry-run."
+                    )
+                ),
+                OutputFormat.JSON,
             )
+            return
         growth = compute_trend_growth(result.data.trends)
         source = trend_series_keyword(result.data.trends)
         scores = [
@@ -430,6 +446,23 @@ def research(
         clusters = cluster_keywords([keyword.keyword for keyword in result.data.keywords], settings)
         typer.echo(render_markdown(result.data, scores, clusters), nl=False)
         if result.completeness is not Completeness.COMPLETE:
+            # The report renders `data` and knows nothing of the envelope, so
+            # without this the run exits 1 behind a document that reads as
+            # complete, with the reason on no channel at all. The skill's own
+            # instruction is to tell the user what is absent using exactly these
+            # three fields.
+            typer.echo(
+                json.dumps(
+                    {
+                        "completeness": result.completeness.value,
+                        "completeness_reason": result.completeness_reason,
+                        "warnings": result.warnings,
+                        "errors": result.errors,
+                    },
+                    ensure_ascii=False,
+                ),
+                err=True,
+            )
             raise typer.Exit(code=1)
         return
     _finish(lambda: cast(Envelope[object], result), OutputFormat(output_format.value))

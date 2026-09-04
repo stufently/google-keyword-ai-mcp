@@ -55,6 +55,14 @@ is the same versioned envelope printed by the corresponding
 `gkai ... --format json` command. Planning is a separate tool so MCP never needs a
 union return type and remains shape-compatible with CLI JSON.
 
+`research_keywords` takes `save_run`, and both research tools take the same
+budget ceilings the CLI exposes (`max_keywords`, `max_autocomplete_queries`,
+`max_ads_calls`, `max_trends_calls`, `max_runtime_seconds`). `save_run` is what
+makes the five run-scoped tools reachable over MCP at all: they are addressed by
+`run_id`, and a run that is not saved has none. There is deliberately no MCP
+mirror of `gkai run list|show|export|resume|rerun` — the run id travels in the
+envelope of the research call that created it.
+
 An empty answer is still an answer, and so is a refused one. A run that does
 not exist, and a request the server refuses — a limit that is not positive, an
 unusable date range, an unknown scenario — both come back as the ordinary

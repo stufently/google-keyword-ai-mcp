@@ -8,6 +8,7 @@ from typing import cast
 
 import anyio
 import httpx
+import pytest
 import respx
 from mcp.client.session import ClientSession
 from mcp.shared.memory import create_client_server_memory_streams
@@ -20,7 +21,14 @@ from google_keyword_ai.mcp import server as mcp_server
 from google_keyword_ai.mcp.server import build_server
 from google_keyword_ai.normalize import KeywordCandidate
 from google_keyword_ai.opportunities import Opportunity
-from google_keyword_ai.pipeline.models import DryRunPlan, SourceUsage
+from google_keyword_ai.pipeline.budget import Budget, BudgetSpend
+from google_keyword_ai.pipeline.models import (
+    DataQuality,
+    DryRunPlan,
+    ResearchData,
+    ResearchStats,
+    SourceUsage,
+)
 from google_keyword_ai.providers.autocomplete import PRIMARY_ENDPOINT
 from google_keyword_ai.providers.base import ProviderInfo
 from google_keyword_ai.providers.expander import ExpansionLimits, ExpansionStats
@@ -693,3 +701,63 @@ def test_analysis_tools_do_not_nest_result_key(thread_offload: None, monkeypatch
     assert explained_tool.output_schema is not None
     assert "result" not in niche_tool.output_schema.get("properties", {})
     assert "result" not in explained_tool.output_schema.get("properties", {})
+
+
+def test_research_over_mcp_can_save_a_run_and_bound_its_cost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The five run-scoped tools are addressed by an id only a saved run has.
+
+    Without `save_run` the research envelope always carried `run_id: null`, so an
+    MCP-only caller had no way to obtain one and `score_run`, `cluster_run`,
+    `explain_score`, `analyze_niche` and `inspect_keyword` could answer nothing
+    but "Run <id> was not found." The budget ceilings travel for the same reason
+    of parity: `plan_research` computes its estimates straight from them, so
+    without them it could only ever describe the default plan.
+    """
+    seen: dict[str, object] = {}
+
+    def fake_run(
+        settings: Settings,
+        target: str,
+        **kwargs: object,
+    ) -> Envelope[ResearchData]:
+        seen.update(kwargs)
+        del settings, target
+        return Envelope(
+            data=ResearchData(
+                scenario="niche",
+                input="topic",
+                language="en",
+                country="US",
+                keywords=[],
+                stats=ResearchStats(spend=BudgetSpend()),
+                data_quality=DataQuality(
+                    sources=[],
+                    retrieved_at=datetime.now(UTC),
+                    absolute_metrics=[],
+                    relative_metrics=[],
+                    derived_metrics=[],
+                    caveats=[],
+                ),
+            ),
+            run_id="run_from_mcp",
+        )
+
+    monkeypatch.setattr(mcp_server, "run_research", fake_run)
+    tool = build_server(Settings(data_dir=tmp_path))._tool_manager.get_tool("research_keywords")
+    assert tool is not None
+
+    envelope = tool.fn(
+        target="topic",
+        save_run=True,
+        max_ads_calls=2,
+        max_runtime_seconds=60.0,
+    )
+
+    assert envelope.run_id == "run_from_mcp"
+    assert seen["save_run"] is True
+    budget = seen["budget"]
+    assert isinstance(budget, Budget)
+    assert budget.max_ads_calls == 2
+    assert budget.max_runtime_seconds == 60.0
