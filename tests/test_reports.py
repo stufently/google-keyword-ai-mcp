@@ -192,3 +192,39 @@ def test_a_previous_quarter_of_zero_is_named_as_the_reason() -> None:
 
     assert "no baseline" in rendered
     assert "could not measure" not in rendered
+
+
+def test_metric_lists_nest_under_their_heading() -> None:
+    """The placeholder was indented and the real entries were not.
+
+    So a run that recorded metrics rendered them as siblings of `- Retrieved
+    at:` and `- Source ...`, while a run that recorded none rendered the
+    placeholder correctly as their child — the populated case looked broken and
+    the empty one did not.
+    """
+    rendered = render_markdown(research(), [], [])
+
+    assert "- Absolute metrics:\n  - avg_monthly_searches\n" in rendered
+    assert "- Relative metrics:\n  - trends_0_100\n" in rendered
+    assert "- Caveats:\n  - First caveat.\n" in rendered
+
+
+def test_the_summary_counts_only_the_clusters_that_formed() -> None:
+    """The leftovers bucket is a returned object, not a cluster.
+
+    Counting it in the headline while the niche diversity factor excluded it put
+    two different answers to the same question into one run's output.
+    """
+    keywords = [
+        ResearchKeyword(keyword=text, normalized=text, discovered_from=["autocomplete"])
+        for text in ("red shoe", "red shoes", "isolated")
+    ]
+    clusters = cluster_keywords(
+        [keyword.keyword for keyword in keywords],
+        Settings(cluster_similarity_threshold=0.3, cluster_min_size=2),
+    )
+
+    rendered = render_markdown(research(keywords=keywords), [], clusters)
+
+    assert "Analyzed 3 keywords in 1 clusters." in rendered
+    assert "1 keywords joined no cluster." in rendered

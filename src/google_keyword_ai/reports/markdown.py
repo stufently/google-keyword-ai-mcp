@@ -15,7 +15,28 @@ def _cell(value: object) -> str:
 
 
 def _list_or_none(values: Sequence[str], missing: str) -> list[str]:
-    return [f"- {_cell(value)}" for value in values] if values else [missing]
+    """Render a nested list under its heading bullet.
+
+    The placeholder callers pass is already indented; the populated branch was
+    not, so real metrics rendered as siblings of the headings above them while
+    the empty case rendered as their child.
+    """
+    return [f"  - {_cell(value)}" for value in values] if values else [missing]
+
+
+def _summary_line(data: ResearchData, clusters: Sequence[KeywordCluster]) -> str:
+    """Count the clusters, and the remainder separately.
+
+    The leftovers bucket is one of the objects `cluster_keywords` returns but it
+    is not a cluster: the niche diversity factor already excludes it, so
+    counting it here answered the same question two different ways in one run.
+    """
+    formed = [cluster for cluster in clusters if not cluster.is_remainder]
+    line = f"Analyzed {len(data.keywords)} keywords in {len(formed)} clusters."
+    leftover = sum(cluster.size for cluster in clusters if cluster.is_remainder)
+    if leftover:
+        line += f" {leftover} keywords joined no cluster."
+    return line
 
 
 def render_markdown(
@@ -37,7 +58,7 @@ def render_markdown(
         "",
         "## Summary",
         "",
-        f"Analyzed {len(data.keywords)} keywords in {len(clusters)} clusters.",
+        _summary_line(data, clusters),
     ]
 
     # A keyword no component could be computed for scores 0.0 with confidence

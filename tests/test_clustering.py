@@ -40,3 +40,31 @@ def test_tokenize_and_similarity() -> None:
     assert tokenize("  Red   SHOES ") == ["red", "shoes"]
     assert similarity(["red", "shoe"], ["red", "boot"]) == 1 / 3
     assert similarity([], []) == 0.0
+
+
+def test_the_leftovers_bucket_is_marked_rather_than_named() -> None:
+    """The remainder is one of the returned objects but it is not a cluster.
+
+    Recognising it by its label made two headline numbers count it while the
+    niche diversity factor excluded it — two answers to one question in the same
+    response — and it misread a real cluster whose shared tokens happened to
+    spell the sentinel.
+    """
+    settings = Settings(cluster_similarity_threshold=0.3, cluster_min_size=2)
+
+    clusters = cluster_keywords(["red shoe", "red shoes", "isolated"], settings)
+
+    formed = [cluster for cluster in clusters if not cluster.is_remainder]
+    remainder = [cluster for cluster in clusters if cluster.is_remainder]
+    assert len(formed) == 1
+    assert [cluster.keywords for cluster in remainder] == [["isolated"]]
+
+
+def test_a_cluster_that_spells_the_sentinel_is_still_a_cluster() -> None:
+    """A label is text the data produced, not a marker this code owns."""
+    settings = Settings(cluster_similarity_threshold=0.3, cluster_min_size=2)
+
+    clusters = cluster_keywords(["unclustered", "unclustered"], settings)
+
+    assert [cluster.label for cluster in clusters] == ["unclustered"]
+    assert clusters[0].is_remainder is False

@@ -8,10 +8,19 @@ from google_keyword_ai.normalize import normalize_keyword
 
 
 class KeywordCluster(BaseModel):
+    """One group of keywords, or the remainder that formed no group.
+
+    `is_remainder` marks the leftovers bucket. It used to be recognised by its
+    label alone, which made two headline numbers count it as a cluster while a
+    third excluded it, and misread a real cluster whose shared tokens happened
+    to spell the sentinel.
+    """
+
     label: str
     keywords: list[str]
     size: int
     shared_tokens: list[str]
+    is_remainder: bool = False
 
 
 def tokenize(text: str) -> list[str]:
@@ -37,13 +46,16 @@ def _shared_tokens(keywords: Sequence[str]) -> list[str]:
     return sorted(shared, key=lambda token: (-counts[token], token))
 
 
-def _build_cluster(keywords: list[str], *, label: str | None = None) -> KeywordCluster:
+def _build_cluster(
+    keywords: list[str], *, label: str | None = None, is_remainder: bool = False
+) -> KeywordCluster:
     shared = _shared_tokens(keywords)
     return KeywordCluster(
         label=label if label is not None else (" ".join(shared) if shared else keywords[0]),
         keywords=keywords,
         size=len(keywords),
         shared_tokens=shared,
+        is_remainder=is_remainder,
     )
 
 
@@ -72,5 +84,5 @@ def cluster_keywords(keywords: Sequence[str], settings: Settings) -> list[Keywor
         else:
             retained.append(_build_cluster(group))
     if unclustered:
-        retained.append(_build_cluster(unclustered, label="unclustered"))
+        retained.append(_build_cluster(unclustered, label="unclustered", is_remainder=True))
     return retained

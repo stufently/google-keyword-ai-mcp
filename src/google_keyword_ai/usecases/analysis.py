@@ -44,6 +44,16 @@ class NicheData(BaseModel):
 
 
 class MetricProvenance(BaseModel):
+    """Where one number on one keyword came from.
+
+    `is_derived` says the figure is not a direct count: a competition index, a
+    click-through rate, a position, an autocomplete relevance score. The run
+    classifies its own metrics into absolute, relative and derived, and this
+    reads that classification -- it used to test membership of `derived_metrics`
+    alone, which holds only the word "opportunities" and never a field name, so
+    the flag could not fire for any metric at all.
+    """
+
     metric: str
     value: int | float | str | None
     source: str
@@ -216,12 +226,19 @@ def _niche_factors(
     trend = None if growth is None else 50.0 + 50.0 * max(-1.0, min(growth, 1.0))
     commercial = _commercial_value(keywords, settings)
     positive_total = sum(volumes)
-    concentration = (
+    # The share of demand that is NOT in the five largest keywords. Measured the
+    # other way round it rewarded exactly what this tool exists to avoid: every
+    # other factor here reads "higher is better", and a niche whose whole demand
+    # sits in one head term scored 100 on it while a twenty-keyword long tail of
+    # the same total demand scored 25. With five keywords or fewer the top five
+    # ARE all of them, so the ratio is identically 1 and says nothing at all --
+    # that is unavailable, not a perfect score.
+    long_tail_share = (
         None
-        if positive_total <= 0
-        else 100.0 * sum(sorted(volumes, reverse=True)[:5]) / positive_total
+        if positive_total <= 0 or len(volumes) <= 5
+        else 100.0 * (1.0 - sum(sorted(volumes, reverse=True)[:5]) / positive_total)
     )
-    regular_clusters = [cluster for cluster in clusters if cluster.label != "unclustered"]
+    regular_clusters = [cluster for cluster in clusters if not cluster.is_remainder]
     diversity = None if not keywords else 100.0 * min(len(regular_clusters) / 10.0, 1.0)
     gsc = [keyword for keyword in keywords if keyword.gsc_impressions is not None]
     site_coverage = (
@@ -257,9 +274,11 @@ def _niche_factors(
             "Average normalized top-of-page bid among keywords with bid data.",
         ),
         _factor(
-            "query_concentration",
-            concentration,
-            "Share of measured demand held by the five largest keywords.",
+            "long_tail_demand_share",
+            long_tail_share,
+            "Share of measured demand held outside the five largest keywords; "
+            "unavailable with five measured keywords or fewer, where there is no "
+            "tail to distinguish from the head.",
         ),
         _factor(
             "cluster_diversity",
@@ -290,7 +309,10 @@ def run_niche_analyze(settings: Settings, run_id: str) -> Envelope[NicheData | N
             opportunity_score=score,
             factors=factors,
             keywords_analyzed=len(research.keywords),
-            clusters=len(clusters),
+            # The leftovers bucket is not a cluster: counting it here while the
+            # diversity factor excludes it put two different answers to the same
+            # question in one response.
+            clusters=sum(1 for cluster in clusters if not cluster.is_remainder),
             caveats=research.data_quality.caveats,
         ),
         run_id=run_id,
@@ -332,7 +354,7 @@ def run_keyword_inspect(
                     retrieved_at=research.data_quality.retrieved_at,
                     language=research.language,
                     country=research.country,
-                    is_derived=metric in research.data_quality.derived_metrics,
+                    is_derived=metric not in research.data_quality.absolute_metrics,
                 )
             )
     return Envelope(
