@@ -7,25 +7,38 @@
 ## IN_PROGRESS
 
 **Живая проверка Google Ads и Search Console** (выбор владельца 05.09.2026) —
-шаг 1 маршрута: проверить предпосылки вживую, спека пишется ПОСЛЕ. Оба
-провайдера реализованы и ни разу не проверены живьём.
+шаг 1 маршрута пройден, найдено две вещи. Дальше — веха через `/grok-build`.
 
-Состояние на 05.09.2026: боевых кредов ни в репозитории, ни в окружении нет
-(`GKAI_*` не выставлено ни одной, `~/.config/gkai` отсутствует). Список
-требуемого передан владельцу через координатора. **GSC, вероятно, проверяем
-уже сегодня:** `~/.config/gcloud/application_default_credentials.json` имеет
-тип `authorized_user` — ровно одну из двух форм, которые принимает загрузчик
-`SearchConsoleProvider.load_credentials`. Ждём разрешения владельца
-использовать эти креды для gkai и подтверждения, что в гранте есть скоуп
-`webmasters.readonly` (косвенный признак — на них работает MCP
-`google-webtools`). Ads без developer token непроверяем в принципе.
-
-Базовый замер без кредов (Docker, 3.14): `gkai doctor` честно отдаёт
-`autocomplete: ready`, `trends: ready (unofficial)`, а по обоим официальным —
-`available: false, detail: "missing credentials"`, схема БД версии 4,
-`completeness: complete`. То есть отсутствие кредов уже обрабатывается
-штатно, и веха — про поведение на НАСТОЯЩИХ ответах Google, а не про
-диагностику их отсутствия.
+- **GSC-половина проверена вживую** (разрешение владельца, TG 9969: использовать
+  его gcloud-ADC `~/.config/gcloud/application_default_credentials.json`, тип
+  `authorized_user`, read-only). Файл в репозиторий не попадает и передаётся
+  только переменной окружения процесса.
+- **Находка 1 — блокирующая: у `SearchConsoleProvider` нет способа задать quota
+  project, и поэтому путь `authorized_user` НЕ РАБОТАЕТ ВООБЩЕ.** Живой
+  `gkai gsc properties` вернул 403. Сырой ответ Google: «The
+  searchconsole.googleapis.com API requires a quota project, which is not set
+  by default» (`reason: accessNotConfigured`, `domain: usageLimits`). Креды,
+  скоуп `webmasters.readonly` и доступ к API исправны: тот же вызов с
+  `creds.with_quota_project(...)` отдал 95 свойств. Провайдер зовёт
+  `Credentials.from_authorized_user_file(path, scopes=[...])` и `quota_project_id`
+  не передаёт никогда. Service-account-путь этим не болеет — у сервисного
+  аккаунта свой проект, — поэтому дефект бьёт ровно по той форме кредов,
+  которую загрузчик объявляет поддерживаемой наравне.
+- **Находка 2: 403 `accessNotConfigured` объявляется отказом аутентификации.**
+  Конверт говорит «Search Console authentication or authorization failed
+  (403)» и отправляет чинить креды, которые исправны. Это ошибка КОНФИГУРАЦИИ
+  проекта, а не отказ в доступе, и лечится она в другом месте.
+- **Ads-половина — за владельцем, не ждём.** Живая проверка невозможна без
+  пяти значений: `GKAI_GOOGLE_ADS_DEVELOPER_TOKEN` (заявка с ревью Google,
+  дни-недели), `GKAI_GOOGLE_ADS_CUSTOMER_ID`, `GKAI_GOOGLE_ADS_CLIENT_ID`,
+  `GKAI_GOOGLE_ADS_CLIENT_SECRET`, `GKAI_GOOGLE_ADS_REFRESH_TOKEN`
+  (+ необязательный `GKAI_GOOGLE_ADS_LOGIN_CUSTOMER_ID`). Пока их нет,
+  `GoogleAdsProvider.is_available()` честно отдаёт `false`, и это единственное,
+  что о нём можно утверждать.
+- Базовый замер без кредов (Docker, 3.14): `gkai doctor` отдаёт
+  `autocomplete: ready`, `trends: ready (unofficial)`, оба официальных —
+  `missing credentials`, схема БД версии 4. Отсутствие кредов обрабатывается
+  штатно; веха — про поведение на НАСТОЯЩИХ ответах Google.
 
 ## COMPLETED (2026-09-04)
 
