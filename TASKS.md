@@ -6,34 +6,9 @@
 
 ## IN_PROGRESS
 
-**M15 — Search Console: quota project и разбор 403.** Спека
-`docs/specs/m15-gsc-quota-project.md`, исполнитель **Codex** (не Grok:
-у вехи нет ни одного критерия, требующего сети, Docker или слушающего
-порта, — всё проверяется на хосте, а по правилам маршрутизации это
-маршрут codex). Прогон идёт.
+**Живая проверка Google Ads — ждёт кредов владельца.** GSC-половина закрыта
+вехой M15 (см. COMPLETED). Следующая веха не выбрана.
 
-Пришли из живой проверки Ads и GSC (выбор владельца 05.09.2026):
-шаг 1 маршрута пройден, найдено две вещи.
-
-- **GSC-половина проверена вживую** (разрешение владельца, TG 9969: использовать
-  его gcloud-ADC `~/.config/gcloud/application_default_credentials.json`, тип
-  `authorized_user`, read-only). Файл в репозиторий не попадает и передаётся
-  только переменной окружения процесса.
-- **Находка 1 — блокирующая: у `SearchConsoleProvider` нет способа задать quota
-  project, и поэтому путь `authorized_user` НЕ РАБОТАЕТ ВООБЩЕ.** Живой
-  `gkai gsc properties` вернул 403. Сырой ответ Google: «The
-  searchconsole.googleapis.com API requires a quota project, which is not set
-  by default» (`reason: accessNotConfigured`, `domain: usageLimits`). Креды,
-  скоуп `webmasters.readonly` и доступ к API исправны: тот же вызов с
-  `creds.with_quota_project(...)` отдал 95 свойств. Провайдер зовёт
-  `Credentials.from_authorized_user_file(path, scopes=[...])` и `quota_project_id`
-  не передаёт никогда. Service-account-путь этим не болеет — у сервисного
-  аккаунта свой проект, — поэтому дефект бьёт ровно по той форме кредов,
-  которую загрузчик объявляет поддерживаемой наравне.
-- **Находка 2: 403 `accessNotConfigured` объявляется отказом аутентификации.**
-  Конверт говорит «Search Console authentication or authorization failed
-  (403)» и отправляет чинить креды, которые исправны. Это ошибка КОНФИГУРАЦИИ
-  проекта, а не отказ в доступе, и лечится она в другом месте.
 - **Ads-половина — за владельцем, не ждём.** Живая проверка невозможна без
   пяти значений: `GKAI_GOOGLE_ADS_DEVELOPER_TOKEN` (заявка с ревью Google,
   дни-недели), `GKAI_GOOGLE_ADS_CUSTOMER_ID`, `GKAI_GOOGLE_ADS_CLIENT_ID`,
@@ -45,6 +20,29 @@
   `autocomplete: ready`, `trends: ready (unofficial)`, оба официальных —
   `missing credentials`, схема БД версии 4. Отсутствие кредов обрабатывается
   штатно; веха — про поведение на НАСТОЯЩИХ ответах Google.
+
+## COMPLETED (2026-09-05)
+
+- **M15 — Search Console: quota project и разбор 403.** Спека
+  `docs/specs/m15-gsc-quota-project.md`, исполнитель Codex, забрано патчем
+  (`a1335f8`). Настройка `GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID` + валидатор на
+  пустое значение; `_load_with` применяет `with_quota_project` к обоим типам
+  кредов; 403 с `reason: accessNotConfigured` стал `InvalidConfigurationError`
+  вместо отказа аутентификации. До вехи путь `authorized_user` не работал
+  вообще — найдено первой же живой проверкой (разрешение владельца, TG 9969:
+  использовать его gcloud-ADC, read-only; файл в репозиторий не попадает и
+  передаётся только переменной окружения).
+  Приёмка: Docker 3.12 и 3.14 по 532 теста зелено (было 496, +36 новых),
+  ruff/format/mypy чисто; 4 мутанта из 4 убиты на НОВЫХ тестах отдельно от
+  старых; живой `gkai gsc properties` с quota project вернул 95 свойств и
+  `completeness: complete`, без него — внятную причину про quota project
+  вместо «authentication failed».
+  **Прогон дважды оборвался на `Selected model is at capacity`** — оба раза не
+  по контракту и не по вине работы: код и тесты дописаны, но финального
+  JSON-отчёта исполнитель не отдал, поэтому машинный гейт вердикта дать не мог
+  и приёмку я делал целиком руками. Урок: оборванный на capacity прогон стоит
+  принимать по факту работы, а не гонять третий раз; гейт — не единственный
+  слой приёмки, а последний из машинных.
 
 ## COMPLETED (2026-09-04)
 
