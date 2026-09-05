@@ -505,6 +505,22 @@ def test_keyword_ideas_include_all_pages_under_cap(tmp_path: Path) -> None:
     assert service.page_fetches == 2
 
 
+def test_last_page_at_the_cap_is_not_truncated(tmp_path: Path) -> None:
+    """A pager that ends exactly at the cap is complete, not truncated.
+
+    Nothing here is about the cap firing: the fifth page simply does not
+    exist. Checking `next_page_token` first is what makes that distinction,
+    and without this case both orders of the two checks pass every other
+    test — while the swapped order marks a full answer partial and keeps it
+    out of the cache forever.
+    """
+    page, service, _limiter = _run_paged_ideas(tmp_path, pages=3, max_pages=3)
+
+    assert service.page_fetches == 3
+    assert page.truncated is False
+    assert page.truncation_reason is None
+
+
 def test_truncated_keyword_ideas_are_not_cached(tmp_path: Path) -> None:
     _page, service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3, calls=2)
 
