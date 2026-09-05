@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     google_ads_historical_cache_ttl_seconds: int = 2592000
     google_ads_page_size: int = 1000
     search_console_credentials_path: Path | None = None
+    search_console_quota_project_id: str | None = None
     search_console_row_limit: int = 25000
     search_console_daily_row_cap: int = 50000
     search_console_cache_ttl_seconds: int = 21600
@@ -152,6 +153,16 @@ class Settings(BaseSettings):
         if value < 1:
             raise InvalidConfigurationError("trends_circuit_breaker_failures must be at least 1.")
         return value
+
+    @field_validator("search_console_quota_project_id")
+    @classmethod
+    def validate_search_console_quota_project_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise InvalidConfigurationError("search_console_quota_project_id must not be blank.")
+        return normalized
 
     @field_validator("search_console_row_limit")
     @classmethod

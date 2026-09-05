@@ -15,6 +15,29 @@ This version does not implement interactive OAuth. Both the sandbox and the
 target server are browserless, so authentication always loads an existing file.
 Only the read-only scope is requested.
 
+## Quota project
+
+A quota project identifies the Google Cloud project used for API quota.
+It is required for `authorized_user` credentials: set
+`search_console_quota_project_id` in configuration or the environment variable
+`GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID` to your Google Cloud project ID.
+Surrounding whitespace is trimmed; an empty or whitespace-only value is refused
+as an invalid configuration. The project ID is not a secret.
+
+The setting is applied to both supported credential types when supplied.
+Service accounts usually use their own project and do not need this setting.
+When omitted, credentials are left unchanged.
+
+Without a quota project, Google returns HTTP 403 with reason
+`accessNotConfigured` and this message:
+
+> Your application is authenticating by using local Application Default Credentials. The searchconsole.googleapis.com API requires a quota project, which is not set by default.
+
+The provider reports this reason as an invalid configuration and names
+`GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID` in the error. Other 403 responses,
+including `forbidden` for a property the user cannot access, remain
+authentication or authorization errors.
+
 ## Collection limits and completeness
 
 The Search Analytics API accepts at most 25,000 rows in `rowLimit`. The provider

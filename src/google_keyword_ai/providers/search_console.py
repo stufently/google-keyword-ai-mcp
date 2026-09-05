@@ -78,6 +78,20 @@ def _translate_http_error(exc: BaseException) -> GkaiError:
             return AuthenticationError(f"Search Console credentials were refused: {exc}")
         return NetworkError(f"Search Console could not be reached: {exc}")
     code = int(status)
+    if code == 403:
+        content = getattr(exc, "content", None)
+        try:
+            payload = json.loads(content) if isinstance(content, (bytes, str)) else None
+        except (TypeError, ValueError, RecursionError):
+            payload = None
+        error = payload.get("error") if isinstance(payload, dict) else None
+        errors = error.get("errors") if isinstance(error, dict) else None
+        first = errors[0] if isinstance(errors, list) and errors else None
+        if isinstance(first, dict) and first.get("reason") == "accessNotConfigured":
+            return InvalidConfigurationError(
+                "Search Console requires a configured quota project (403); "
+                "set GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID."
+            )
     if code in {401, 403}:
         return AuthenticationError(
             f"Search Console authentication or authorization failed ({code})."
@@ -188,8 +202,7 @@ class SearchConsoleProvider(Provider):
             "Search Console credentials type must be 'service_account' or 'authorized_user'."
         )
 
-    @staticmethod
-    def _load_with(loader: Callable[..., object], path: Path) -> object:
+    def _load_with(self, loader: Callable[..., object], path: Path) -> object:
         """Build credentials, reporting a malformed file as a refused configuration.
 
         The type field is the only thing checked before this point, so a file
@@ -199,11 +212,20 @@ class SearchConsoleProvider(Provider):
         as a crash rather than as the configuration problem it is.
         """
         try:
-            return loader(path, scopes=[READONLY_SCOPE])
+            credentials = loader(path, scopes=[READONLY_SCOPE])
         except ValueError as exc:
             raise InvalidConfigurationError(
                 f"Search Console credentials file {path} is not usable: {exc}"
             ) from exc
+        quota_project_id = self._settings.search_console_quota_project_id
+        if quota_project_id is None:
+            return credentials
+        with_quota_project = getattr(credentials, "with_quota_project", None)
+        if not callable(with_quota_project):
+            raise InvalidConfigurationError(
+                "This Search Console credentials type does not support a quota project."
+            )
+        return with_quota_project(quota_project_id)
 
     def build_service(self) -> object:
         """Build the Search Analytics client, refusing rather than crashing.

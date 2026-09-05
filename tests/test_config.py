@@ -140,3 +140,34 @@ def test_google_ads_settings_defaults() -> None:
 def test_google_ads_settings_reject_non_positive_values(field: str) -> None:
     with pytest.raises(InvalidConfigurationError):
         Settings.model_validate({field: 0})
+
+
+def test_quota_project_id_is_read_from_the_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID", "  test-quota-project \t")
+
+    assert Settings().search_console_quota_project_id == "test-quota-project"
+    settings = load_settings(tmp_path)
+    assert settings.search_console_quota_project_id == "test-quota-project"
+    assert masked_dump(settings)["search_console_quota_project_id"] == "test-quota-project"
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_blank_quota_project_is_refused(
+    value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(InvalidConfigurationError, match="quota_project_id must not be blank"):
+        Settings(search_console_quota_project_id=value)
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID", value)
+    with pytest.raises(InvalidConfigurationError, match="quota_project_id must not be blank"):
+        load_settings(tmp_path)
+
+
+def test_quota_project_defaults_to_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID", raising=False)
+    assert Settings().search_console_quota_project_id is None
+    assert Settings(search_console_quota_project_id=None).search_console_quota_project_id is None

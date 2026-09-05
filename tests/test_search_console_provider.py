@@ -911,3 +911,191 @@ def test_the_default_data_state_is_one_google_defines(tmp_path: Path) -> None:
 
     _site, body = service.calls[0]
     assert body["dataState"] == "final"
+
+
+class FakeQuotaCredentials:
+    def __init__(self, quota_project_id: str | None = None) -> None:
+        self.quota_project_id = quota_project_id
+
+    def with_quota_project(self, quota_project_id: str) -> "FakeQuotaCredentials":
+        return FakeQuotaCredentials(quota_project_id)
+
+
+def _quota_credentials_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    credential_type: str,
+    credentials: object,
+    quota_project_id: str | None,
+) -> SearchConsoleProvider:
+    from google.oauth2 import credentials as user_credentials
+    from google.oauth2 import service_account
+
+    settings = _settings(tmp_path, search_console_quota_project_id=quota_project_id)
+    path = settings.search_console_credentials_path
+    assert path is not None
+    path.write_text(json.dumps({"type": credential_type}), encoding="utf-8")
+
+    def loader(filename: Path, *, scopes: list[str]) -> object:
+        assert filename == path
+        assert scopes == ["https://www.googleapis.com/auth/webmasters.readonly"]
+        return credentials
+
+    if credential_type == "authorized_user":
+        monkeypatch.setattr(
+            user_credentials.Credentials, "from_authorized_user_file", staticmethod(loader)
+        )
+    else:
+        monkeypatch.setattr(
+            service_account.Credentials, "from_service_account_file", staticmethod(loader)
+        )
+    return SearchConsoleProvider(settings=settings, cache=None, rate_limiter=None)
+
+
+def test_authorized_user_credentials_get_the_quota_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = FakeQuotaCredentials()
+    provider = _quota_credentials_provider(
+        tmp_path, monkeypatch, "authorized_user", original, "test-quota-project"
+    )
+
+    result = provider.load_credentials()
+
+    assert isinstance(result, FakeQuotaCredentials)
+    assert result is not original
+    assert result.quota_project_id == "test-quota-project"
+    assert original.quota_project_id is None
+
+
+def test_service_account_credentials_get_the_quota_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = FakeQuotaCredentials("original-project")
+    provider = _quota_credentials_provider(
+        tmp_path, monkeypatch, "service_account", original, "test-quota-project"
+    )
+
+    result = provider.load_credentials()
+
+    assert isinstance(result, FakeQuotaCredentials)
+    assert result is not original
+    assert result.quota_project_id == "test-quota-project"
+    assert original.quota_project_id == "original-project"
+
+
+@pytest.mark.parametrize("credential_type", ["authorized_user", "service_account"])
+def test_credentials_are_untouched_without_a_quota_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, credential_type: str
+) -> None:
+    class UntouchedCredentials(FakeQuotaCredentials):
+        def with_quota_project(self, quota_project_id: str) -> FakeQuotaCredentials:
+            pytest.fail("with_quota_project must not be called without a quota project")
+
+    original = UntouchedCredentials("existing-project")
+    provider = _quota_credentials_provider(tmp_path, monkeypatch, credential_type, original, None)
+
+    assert provider.load_credentials() is original
+    assert original.quota_project_id == "existing-project"
+
+
+@pytest.mark.parametrize("credential_type", ["authorized_user", "service_account"])
+def test_credentials_without_quota_project_support_are_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, credential_type: str
+) -> None:
+    provider = _quota_credentials_provider(
+        tmp_path, monkeypatch, credential_type, object(), "test-quota-project"
+    )
+    with pytest.raises(InvalidConfigurationError, match="type does not support a quota project"):
+        provider.load_credentials()
+
+
+@pytest.mark.parametrize("as_bytes", [True, False])
+def test_access_not_configured_is_a_configuration_error(as_bytes: bool) -> None:
+    from google_keyword_ai.providers.search_console import _translate_http_error
+
+    content = json.dumps(
+        {"error": {"errors": [{"reason": "accessNotConfigured", "domain": "usageLimits"}]}}
+    )
+    error = _http_error(403)
+    error.content = content.encode() if as_bytes else content
+
+    result = _translate_http_error(error)
+
+    assert isinstance(result, InvalidConfigurationError)
+    assert "quota project" in result.message
+    assert "GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID" in result.message
+
+
+def test_forbidden_stays_an_authentication_error() -> None:
+    from google_keyword_ai.providers.search_console import _translate_http_error
+
+    error = _http_error(403)
+    error.content = json.dumps(
+        {
+            "error": {
+                "errors": [
+                    {"reason": "forbidden", "domain": "global"},
+                    {"reason": "accessNotConfigured"},
+                ]
+            }
+        }
+    ).encode()
+
+    result = _translate_http_error(error)
+
+    assert isinstance(result, AuthenticationError)
+    assert result.message == "Search Console authentication or authorization failed (403)."
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,
+        b"",
+        "",
+        b"not json",
+        "{broken",
+        b"\xff",
+        b"{}",
+        b"[]",
+        b"null",
+        b'"text"',
+        b"42",
+        b'{"error": null}',
+        b'{"error": []}',
+        b'{"error": {}}',
+        b'{"error": {"errors": []}}',
+        b'{"error": {"errors": null}}',
+        b'{"error": {"errors": {"0": {"reason": "accessNotConfigured"}}}}',
+        b'{"error": {"errors": [null]}}',
+        b'{"error": {"errors": [{}]}}',
+        b'{"error": {"errors": ["accessNotConfigured"]}}',
+        b'{"error": {"errors": [{"reason": ["accessNotConfigured"]}]}}',
+    ],
+)
+def test_an_unreadable_403_body_stays_an_authentication_error(content: object) -> None:
+    from google_keyword_ai.providers.search_console import _translate_http_error
+
+    error = _http_error(403)
+    if content is None:
+        del error.content
+    else:
+        error.content = content
+
+    result = _translate_http_error(error)
+
+    assert isinstance(result, AuthenticationError)
+    assert result.message == "Search Console authentication or authorization failed (403)."
+
+
+def test_access_not_configured_does_not_change_401() -> None:
+    from google_keyword_ai.providers.search_console import _translate_http_error
+
+    error = _http_error(401)
+    error.content = b'{"error": {"errors": [{"reason": "accessNotConfigured"}]}}'
+
+    result = _translate_http_error(error)
+
+    assert isinstance(result, AuthenticationError)
+    assert result.message == "Search Console authentication or authorization failed (401)."
