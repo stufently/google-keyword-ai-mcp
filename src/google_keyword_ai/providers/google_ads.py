@@ -60,6 +60,12 @@ class KeywordIdea(BaseModel):
     metrics: KeywordMetrics
 
 
+class KeywordIdeaPage(BaseModel):
+    ideas: list[KeywordIdea]
+    truncated: bool
+    truncation_reason: str | None
+
+
 # The API's own ceiling on `KeywordSeed` and `KeywordAndUrlSeed`.
 _MAX_SEED_KEYWORDS = 20
 
@@ -397,35 +403,54 @@ class GoogleAdsProvider(Provider):
         self,
         service: object,
         request: dict[str, Any],
-    ) -> list[KeywordIdea]:
+    ) -> KeywordIdeaPage:
         """Walk the pager one page at a time, throttling between pages.
 
         ``generate_keyword_ideas`` returns a pager, not a plain response: every
         page after the first is another RPC, issued lazily while the results are
         iterated. Consuming it inside a single worker thread would fire those
         calls back to back and blow through the one-request-per-second limit
-        that the first page was carefully throttled for.
+        that the first page was carefully throttled for. The walk stops after
+        ``google_ads_max_pages`` so a wide seed cannot drain the whole runtime
+        budget inside one counted Ads call.
         """
         if self._rate_limiter is None:
             raise ProviderUnavailableError("Google Ads rate limiter is not configured.")
 
+        max_pages = self._settings.google_ads_max_pages
         try:
             pager = await anyio.to_thread.run_sync(
                 partial(self._invoke, service, IDEAS_ENDPOINT, request)
             )
             pages = iter(cast(Iterable[object], getattr(pager, "pages", [pager])))
             ideas: list[KeywordIdea] = []
+            truncated = False
+            truncation_reason: str | None = None
+            pages_read = 0
             page = await anyio.to_thread.run_sync(partial(next, pages, None))
             while page is not None:
                 rows = getattr(page, "results", page)
                 ideas.extend(_parse_ideas(rows, historical=False))
+                pages_read += 1
                 # The page itself says whether another RPC is coming, so we only
-                # pay for a throttle when one actually is.
+                # pay for a throttle when one actually is — and never for a
+                # page we have already decided not to read.
                 if not getattr(page, "next_page_token", ""):
+                    break
+                if pages_read >= max_pages:
+                    truncated = True
+                    truncation_reason = (
+                        f"Google Ads keyword ideas were truncated after {max_pages} "
+                        "pages (google_ads_max_pages); remaining pages were not requested."
+                    )
                     break
                 await self._rate_limiter.acquire()
                 page = await anyio.to_thread.run_sync(partial(next, pages, None))
-            return ideas
+            return KeywordIdeaPage(
+                ideas=ideas,
+                truncated=truncated,
+                truncation_reason=truncation_reason,
+            )
         except _library_exception_types() as exc:
             raise _translate_library_error(exc) from exc
 
@@ -456,7 +481,7 @@ class GoogleAdsProvider(Provider):
         market: Market,
         *,
         include_adult: bool = False,
-    ) -> list[KeywordIdea]:
+    ) -> KeywordIdeaPage:
         customer_id = self._require_available()
         mode = seed.mode()
         params = {
@@ -469,7 +494,7 @@ class GoogleAdsProvider(Provider):
         cache_key = self._cache_key(IDEAS_ENDPOINT, params, customer_id)
         cached = self._cached(cache_key)
         if cached is not None:
-            return cached
+            return KeywordIdeaPage(ideas=cached, truncated=False, truncation_reason=None)
 
         request: dict[str, Any] = {
             "customer_id": customer_id,
@@ -495,15 +520,19 @@ class GoogleAdsProvider(Provider):
         if self._rate_limiter is None:
             raise ProviderUnavailableError("Google Ads rate limiter is not configured.")
         await self._rate_limiter.acquire()
-        ideas = await self._call_ideas(self.build_service(), request)
-        self._store(
-            cache_key,
-            IDEAS_ENDPOINT,
-            customer_id,
-            ideas,
-            self._settings.google_ads_ideas_cache_ttl_seconds,
-        )
-        return ideas
+        page = await self._call_ideas(self.build_service(), request)
+        # A truncated page is a cap, not a complete answer. Caching it for a
+        # week would serve the partial set as if it were full, including to a
+        # later run that raised google_ads_max_pages.
+        if not page.truncated:
+            self._store(
+                cache_key,
+                IDEAS_ENDPOINT,
+                customer_id,
+                page.ideas,
+                self._settings.google_ads_ideas_cache_ttl_seconds,
+            )
+        return page
 
     async def historical_metrics(
         self,

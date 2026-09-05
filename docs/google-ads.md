@@ -32,6 +32,12 @@ Ideas are cached for a week and historical metrics for 30 days, because Google
 refreshes the latter about once a month. The cache key includes the customer
 ID so that accounts never see each other's data.
 
+Each ideas request asks for `google_ads_page_size` (default 1000) rows per
+page. The pager is walked at most `google_ads_max_pages` times (default 20,
+`GKAI_GOOGLE_ADS_MAX_PAGES`). Stopping at the ceiling marks the answer
+truncated and skips the cache: a partial page stored for a week would otherwise
+be served as complete, including to a later run with a higher ceiling.
+
 Country criteria IDs come from the official `geotargets-2026-08-12.csv`, and
 language IDs from the Google Ads `codes-formats` page; both were captured on
 2026-09-02. The project code `zh` is mapped to `zh_CN` (1017). Google Ads has

@@ -21,7 +21,7 @@ from google_keyword_ai.pipeline.models import (
     SourceUsage,
 )
 from google_keyword_ai.providers.expander import ExpansionStats
-from google_keyword_ai.providers.google_ads import AdsSeed, KeywordIdea
+from google_keyword_ai.providers.google_ads import AdsSeed, KeywordIdea, KeywordIdeaPage
 from google_keyword_ai.providers.search_console import SearchAnalyticsPage, SiteProperty
 from google_keyword_ai.providers.trends.models import TrendsResult
 from google_keyword_ai.targets import is_bare_domain
@@ -64,7 +64,7 @@ class ExpanderLike(Protocol):
 class AdsLike(Protocol):
     async def keyword_ideas(
         self, seed: AdsSeed, market: Market, *, include_adult: bool = False
-    ) -> list[KeywordIdea]: ...
+    ) -> KeywordIdeaPage: ...
 
     async def historical_metrics(
         self, keywords: Sequence[str], market: Market
@@ -491,14 +491,19 @@ class CompetitorResearch:
             context.budget_guard.spend("ads")
             used.add("google_ads")
             try:
-                ideas = await context.google_ads.keyword_ideas(seed, context.market)
+                page = await context.google_ads.keyword_ideas(seed, context.market)
             except GkaiError as exc:
                 context.errors.append(str(exc))
             else:
                 _apply_ideas(
                     keywords,
-                    _cap(context, list(ideas), context.budget_guard.budget.max_keywords),
+                    _cap(context, page.ideas, context.budget_guard.budget.max_keywords),
                 )
+                if page.truncated:
+                    context.warnings.append(
+                        page.truncation_reason
+                        or "Google Ads keyword ideas were truncated by google_ads_max_pages."
+                    )
                 if keywords:
                     context.budget_guard.spend("keywords", len(keywords))
                 else:

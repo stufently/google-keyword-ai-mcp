@@ -12,9 +12,11 @@ from google_keyword_ai.cache import SqliteCache
 from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness
 from google_keyword_ai.errors import ApiError
-from google_keyword_ai.providers.google_ads import GoogleAdsProvider
+from google_keyword_ai.providers.base import ProviderInfo
+from google_keyword_ai.providers.google_ads import GoogleAdsProvider, KeywordIdeaPage
 from google_keyword_ai.ratelimit import InterProcessRateLimiter
 from google_keyword_ai.usecases import ads as ads_usecase
+from test_google_ads_provider import PagedService
 
 
 async def _working_thread_runner[T](function: Callable[..., T], *args: object) -> T:
@@ -91,7 +93,7 @@ def _credentials(data_dir: Path) -> Settings:
     )
 
 
-def _install_service(monkeypatch: pytest.MonkeyPatch, service: FakeService) -> None:
+def _install_service(monkeypatch: pytest.MonkeyPatch, service: object) -> None:
     def build_provider(settings: Settings, cache: SqliteCache) -> GoogleAdsProvider:
         return GoogleAdsProvider(
             settings=settings,
@@ -184,3 +186,54 @@ def test_competitor_with_keyword_uses_combined_seed(
 
     assert envelope.data.mode == "keyword_and_url_seed"
     assert "keyword_and_url_seed" in service.requests[0]
+
+
+def test_run_ads_ideas_truncated_page_is_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = PagedService(pages=5)
+    settings = _credentials(tmp_path / "truncated").model_copy(update={"google_ads_max_pages": 3})
+    _install_service(monkeypatch, service)
+
+    envelope = ads_usecase.run_ads_ideas(settings, ["seed"], language="en", country="US")
+
+    assert envelope.completeness is Completeness.PARTIAL
+    assert envelope.completeness_reason
+    assert any("google_ads_max_pages" in warning for warning in envelope.warnings)
+
+
+def test_run_ads_ideas_truncated_empty_page_is_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_fetch(
+        settings: Settings,
+        cache: SqliteCache,
+        seed: object,
+        market: object,
+        include_adult: bool,
+    ) -> tuple[ProviderInfo, KeywordIdeaPage]:
+        del settings, cache, seed, market, include_adult
+        return (
+            ProviderInfo(name="google_ads", official=True, stability="stable"),
+            KeywordIdeaPage(
+                ideas=[],
+                truncated=True,
+                truncation_reason=(
+                    "Google Ads keyword ideas were truncated after 1 pages "
+                    "(google_ads_max_pages); remaining pages were not requested."
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(ads_usecase, "_fetch_ideas", fake_fetch)
+
+    envelope = ads_usecase.run_ads_ideas(
+        _credentials(tmp_path / "truncated-empty"),
+        ["seed"],
+        language="en",
+        country="US",
+    )
+
+    assert envelope.completeness is Completeness.PARTIAL
+    assert envelope.completeness_reason
+    assert any("google_ads_max_pages" in warning for warning in envelope.warnings)

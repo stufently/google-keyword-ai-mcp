@@ -26,7 +26,7 @@ from google_keyword_ai.errors import (
     RateLimitError,
 )
 from google_keyword_ai.market import Market
-from google_keyword_ai.providers.google_ads import AdsSeed, GoogleAdsProvider
+from google_keyword_ai.providers.google_ads import AdsSeed, GoogleAdsProvider, KeywordIdeaPage
 from google_keyword_ai.ratelimit import InterProcessRateLimiter
 from google_keyword_ai.storage.engine import open_database
 
@@ -131,16 +131,16 @@ def working_thread_offload(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_micros_are_converted_to_currency_units(tmp_path: Path) -> None:
     provider, engine = _provider(_credentials(tmp_path / "data"), FakeService())
     try:
-        ideas = anyio.run(
+        page = anyio.run(
             provider.keyword_ideas, AdsSeed(keywords=["keyword"]), Market.parse("en", "US")
         )
     finally:
         engine.dispose()
 
-    assert ideas[0].metrics.low_top_of_page_bid == 1.5
-    assert ideas[0].metrics.high_top_of_page_bid == 2.75
-    assert ideas[0].metrics.average_cpc == 1.25
-    assert ideas[0].metrics.currency is None
+    assert page.ideas[0].metrics.low_top_of_page_bid == 1.5
+    assert page.ideas[0].metrics.high_top_of_page_bid == 2.75
+    assert page.ideas[0].metrics.average_cpc == 1.25
+    assert page.ideas[0].metrics.currency is None
 
 
 @pytest.mark.parametrize(
@@ -429,16 +429,92 @@ def test_every_page_after_the_first_is_throttled(tmp_path: Path) -> None:
         service_factory=lambda: service,
     )
     try:
-        ideas = anyio.run(
+        page = anyio.run(
             provider.keyword_ideas, AdsSeed(keywords=["keyword"]), Market.parse("en", "US")
         )
     finally:
         engine.dispose()
 
-    assert [idea.text for idea in ideas] == ["keyword-0", "keyword-1", "keyword-2"]
+    assert [idea.text for idea in page.ideas] == ["keyword-0", "keyword-1", "keyword-2"]
     assert service.page_fetches == 3
     # One for the initial call plus one before each of the two extra pages.
     assert limiter.acquisitions == 3
+
+
+def _run_paged_ideas(
+    tmp_path: Path,
+    *,
+    pages: int,
+    max_pages: int,
+    calls: int = 1,
+) -> tuple[KeywordIdeaPage, PagedService, CountingRateLimiter]:
+    settings = _credentials(tmp_path / "data").model_copy(
+        update={"google_ads_max_pages": max_pages}
+    )
+    engine = open_database(settings)
+    service = PagedService(pages=pages)
+    limiter = CountingRateLimiter(settings.data_dir / "ads.lock")
+    provider = GoogleAdsProvider(
+        settings=settings,
+        cache=SqliteCache(engine, settings),
+        rate_limiter=limiter,
+        service_factory=lambda: service,
+    )
+    try:
+        page: KeywordIdeaPage | None = None
+        for _ in range(calls):
+            page = anyio.run(
+                provider.keyword_ideas, AdsSeed(keywords=["keyword"]), Market.parse("en", "US")
+            )
+        assert page is not None
+        return page, service, limiter
+    finally:
+        engine.dispose()
+
+
+def test_keyword_ideas_fetch_only_max_pages(tmp_path: Path) -> None:
+    _page, service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3)
+
+    assert service.page_fetches == 3
+
+
+def test_keyword_ideas_truncated_when_pages_exceed_cap(tmp_path: Path) -> None:
+    page, _service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3)
+
+    assert page.truncated is True
+
+
+def test_keyword_ideas_truncation_reason_names_setting(tmp_path: Path) -> None:
+    page, _service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3)
+
+    assert page.truncation_reason is not None
+    assert "google_ads_max_pages" in page.truncation_reason
+
+
+def test_keyword_ideas_do_not_throttle_unread_pages(tmp_path: Path) -> None:
+    _page, _service, limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3)
+
+    assert limiter.acquisitions == 3
+
+
+def test_keyword_ideas_include_all_pages_under_cap(tmp_path: Path) -> None:
+    page, service, _limiter = _run_paged_ideas(tmp_path, pages=2, max_pages=5)
+
+    assert page.truncated is False
+    assert [idea.text for idea in page.ideas] == ["keyword-0", "keyword-1"]
+    assert service.page_fetches == 2
+
+
+def test_truncated_keyword_ideas_are_not_cached(tmp_path: Path) -> None:
+    _page, service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3, calls=2)
+
+    assert len(service.calls) == 2
+
+
+def test_complete_keyword_ideas_remain_cached(tmp_path: Path) -> None:
+    _page, service, _limiter = _run_paged_ideas(tmp_path, pages=2, max_pages=5, calls=2)
+
+    assert len(service.calls) == 1
 
 
 def test_a_month_google_could_not_measure_is_not_a_month_of_no_demand(tmp_path: Path) -> None:

@@ -17,7 +17,12 @@ from google_keyword_ai.errors import (
 )
 from google_keyword_ai.market import Market
 from google_keyword_ai.providers.base import ProviderInfo
-from google_keyword_ai.providers.google_ads import AdsSeed, GoogleAdsProvider, KeywordIdea
+from google_keyword_ai.providers.google_ads import (
+    AdsSeed,
+    GoogleAdsProvider,
+    KeywordIdea,
+    KeywordIdeaPage,
+)
 from google_keyword_ai.ratelimit import InterProcessRateLimiter
 from google_keyword_ai.storage.engine import open_database
 from google_keyword_ai.targets import is_bare_domain
@@ -48,10 +53,10 @@ async def _fetch_ideas(
     seed: AdsSeed,
     market: Market,
     include_adult: bool,
-) -> tuple[ProviderInfo, list[KeywordIdea]]:
+) -> tuple[ProviderInfo, KeywordIdeaPage]:
     provider = _build_provider(settings, cache)
-    ideas = await provider.keyword_ideas(seed, market, include_adult=include_adult)
-    return provider.info, ideas
+    page = await provider.keyword_ideas(seed, market, include_adult=include_adult)
+    return provider.info, page
 
 
 async def _fetch_historical(
@@ -108,7 +113,7 @@ def run_ads_ideas(
     provider_info = ProviderInfo(name="google_ads", official=True, stability="stable")
     engine = open_database(settings)
     try:
-        provider_info, ideas = anyio.run(
+        provider_info, page = anyio.run(
             partial(
                 _fetch_ideas,
                 settings,
@@ -129,8 +134,26 @@ def run_ads_ideas(
     finally:
         engine.dispose()
 
+    ideas = page.ideas
     if limit is not None:
         ideas = ideas[:limit]
+    if page.truncated:
+        reason = (
+            page.truncation_reason
+            or "Google Ads keyword ideas were truncated by google_ads_max_pages."
+        )
+        return Envelope(
+            data=AdsData(
+                provider=provider_info,
+                mode=mode,
+                language=market.language,
+                country=market.country,
+                ideas=ideas,
+            ),
+            warnings=[reason],
+            completeness=Completeness.PARTIAL,
+            completeness_reason=reason,
+        )
     if not ideas:
         return _empty_envelope(
             provider_info,

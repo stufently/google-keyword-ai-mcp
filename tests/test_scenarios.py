@@ -17,7 +17,12 @@ from google_keyword_ai.pipeline.scenarios import (
     ScenarioContext,
 )
 from google_keyword_ai.providers.expander import ExpansionStats
-from google_keyword_ai.providers.google_ads import AdsSeed, KeywordIdea, KeywordMetrics
+from google_keyword_ai.providers.google_ads import (
+    AdsSeed,
+    KeywordIdea,
+    KeywordIdeaPage,
+    KeywordMetrics,
+)
 from google_keyword_ai.providers.search_console import (
     SearchAnalyticsPage,
     SearchAnalyticsRow,
@@ -57,11 +62,20 @@ class FakeExpander:
 
 
 class FakeAds:
-    def __init__(self, log: list[str], ideas: list[KeywordIdea] | None = None) -> None:
+    def __init__(
+        self,
+        log: list[str],
+        ideas: list[KeywordIdea] | None = None,
+        *,
+        truncated: bool = False,
+        truncation_reason: str | None = None,
+    ) -> None:
         self.log = log
         self.batches: list[list[str]] = []
         self.seeds: list[AdsSeed] = []
         self.ideas = ideas
+        self.truncated = truncated
+        self.truncation_reason = truncation_reason
 
     async def keyword_ideas(
         self,
@@ -69,18 +83,25 @@ class FakeAds:
         market: Market,
         *,
         include_adult: bool = False,
-    ) -> list[KeywordIdea]:
+    ) -> KeywordIdeaPage:
         del market, include_adult
         self.log.append("ads_ideas")
         self.seeds.append(seed)
-        if self.ideas is not None:
-            return self.ideas
-        return [
-            KeywordIdea(
-                text="competitor keyword",
-                metrics=KeywordMetrics(avg_monthly_searches=900, competition="HIGH"),
-            )
-        ]
+        ideas = (
+            self.ideas
+            if self.ideas is not None
+            else [
+                KeywordIdea(
+                    text="competitor keyword",
+                    metrics=KeywordMetrics(avg_monthly_searches=900, competition="HIGH"),
+                )
+            ]
+        )
+        return KeywordIdeaPage(
+            ideas=ideas,
+            truncated=self.truncated,
+            truncation_reason=self.truncation_reason,
+        )
 
     async def historical_metrics(
         self, keywords: Sequence[str], market: Market
@@ -259,6 +280,33 @@ def test_competitor_order_and_site_seed(settings: Settings) -> None:
         assert log == ["ads_ideas", "trends"]
         assert ads.seeds[0].mode() == "site_seed"
         assert data.keywords[0].keyword == "competitor keyword"
+
+    anyio.run(exercise)
+
+
+def test_competitor_research_keeps_keywords_when_ads_ideas_truncated(
+    settings: Settings,
+) -> None:
+    async def exercise() -> None:
+        log: list[str] = []
+        ads = FakeAds(
+            log,
+            ideas=[
+                KeywordIdea(
+                    text="kept keyword",
+                    metrics=KeywordMetrics(avg_monthly_searches=10, competition="LOW"),
+                )
+            ],
+            truncated=True,
+            truncation_reason="Keyword ideas were truncated by google_ads_max_pages.",
+        )
+        context = _context(settings, log=log, ads=ads, trends=FakeTrends(log))
+        data = await CompetitorResearch("example.com").run(context)
+        assert any(
+            "google_ads_max_pages" in warning or "truncat" in warning.lower()
+            for warning in context.warnings
+        )
+        assert any(keyword.keyword == "kept keyword" for keyword in data.keywords)
 
     anyio.run(exercise)
 

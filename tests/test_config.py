@@ -126,6 +126,22 @@ def test_google_ads_settings_defaults() -> None:
     assert settings.google_ads_ideas_cache_ttl_seconds == 604800
     assert settings.google_ads_historical_cache_ttl_seconds == 2592000
     assert settings.google_ads_page_size == 1000
+    assert settings.google_ads_max_pages == 20
+
+
+def test_google_ads_max_pages_defaults_to_twenty() -> None:
+    assert Settings().google_ads_max_pages == 20
+
+
+def test_google_ads_max_pages_reads_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GKAI_GOOGLE_ADS_MAX_PAGES", "3")
+    assert Settings().google_ads_max_pages == 3
+
+
+@pytest.mark.parametrize("value", [0, -1])
+def test_google_ads_max_pages_rejects_zero_and_negative(value: int) -> None:
+    with pytest.raises(InvalidConfigurationError):
+        Settings(google_ads_max_pages=value)
 
 
 @pytest.mark.parametrize(
@@ -135,6 +151,7 @@ def test_google_ads_settings_defaults() -> None:
         "google_ads_ideas_cache_ttl_seconds",
         "google_ads_historical_cache_ttl_seconds",
         "google_ads_page_size",
+        "google_ads_max_pages",
     ],
 )
 def test_google_ads_settings_reject_non_positive_values(field: str) -> None:

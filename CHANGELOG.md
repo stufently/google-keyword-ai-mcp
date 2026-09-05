@@ -9,6 +9,9 @@
 
 ### Исправлено
 
+- Обход страниц Google Ads Keyword Planner ограничен `google_ads_max_pages`
+  (дефолт 20, `GKAI_GOOGLE_ADS_MAX_PAGES`) и честно помечает обрезанный ответ;
+  усечённый результат в кеш не кладётся.
 - Search Console применяет `GKAI_SEARCH_CONSOLE_QUOTA_PROJECT_ID` к кредам
   обоих поддерживаемых типов, чтобы `authorized_user` мог передать обязательный
   quota project. Ответ 403 с причиной `accessNotConfigured` теперь сообщает

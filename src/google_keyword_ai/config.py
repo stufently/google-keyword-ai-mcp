@@ -63,6 +63,7 @@ class Settings(BaseSettings):
     google_ads_ideas_cache_ttl_seconds: int = 604800
     google_ads_historical_cache_ttl_seconds: int = 2592000
     google_ads_page_size: int = 1000
+    google_ads_max_pages: int = 20
     search_console_credentials_path: Path | None = None
     search_console_quota_project_id: str | None = None
     search_console_row_limit: int = 25000
@@ -140,6 +141,7 @@ class Settings(BaseSettings):
         "google_ads_ideas_cache_ttl_seconds",
         "google_ads_historical_cache_ttl_seconds",
         "google_ads_page_size",
+        "google_ads_max_pages",
     )
     @classmethod
     def validate_positive_google_ads_integer(cls, value: int) -> int:

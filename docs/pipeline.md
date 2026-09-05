@@ -34,9 +34,11 @@ candidates.
 - `max_autocomplete_queries`: maximum expansion queries.
 - `max_ads_calls`: maximum Keyword Planner operations. A historical-metrics
   batch of up to 20 keywords counts as one, and so does a keyword-ideas
-  request, even where Google splits its answer across pages — the provider
-  walks those pages under the shared one-request-per-second limit, so a wide
-  seed costs more time than the counter suggests.
+  request. Google may split its answer across pages; the provider walks them
+  under the shared one-request-per-second limit, but stops after
+  `google_ads_max_pages` (default 20) and reports the answer as truncated
+  rather than draining the pager. A wide seed can still cost more time than
+  the call counter suggests, bounded by that page ceiling.
 - `max_trends_calls`: maximum Trends requests.
 - `max_runtime_seconds`: total elapsed runtime ceiling.
 
