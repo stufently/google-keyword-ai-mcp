@@ -20,6 +20,13 @@
 `webmasters.readonly` (косвенный признак — на них работает MCP
 `google-webtools`). Ads без developer token непроверяем в принципе.
 
+Базовый замер без кредов (Docker, 3.14): `gkai doctor` честно отдаёт
+`autocomplete: ready`, `trends: ready (unofficial)`, а по обоим официальным —
+`available: false, detail: "missing credentials"`, схема БД версии 4,
+`completeness: complete`. То есть отсутствие кредов уже обрабатывается
+штатно, и веха — про поведение на НАСТОЯЩИХ ответах Google, а не про
+диагностику их отсутствия.
+
 ## COMPLETED (2026-09-04)
 
 - **M14 — верхняя граница объёма кеша.** Спека `docs/specs/m14-cache-size-limit.md`,
