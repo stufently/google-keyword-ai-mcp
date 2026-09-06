@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -12,10 +15,13 @@ from typer.testing import CliRunner
 
 from google_keyword_ai.cli import main as cli_main
 from google_keyword_ai.config import Settings
+from google_keyword_ai.demand import DemandStatus
 from google_keyword_ai.envelope import Completeness
+from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.mcp.server import build_server
 from google_keyword_ai.providers.trends.unofficial import EXPLORE_URL, WARMUP_URL, WIDGETDATA_URL
 from google_keyword_ai.usecases.demand import (
+    COVERAGE_CAVEAT,
     RELATIVE_CAVEAT,
     RESOLUTION_CAVEAT,
     STITCHING_CAVEAT,
@@ -40,6 +46,8 @@ def mock_trends(
     collapsed: bool = False,
     widget_noise: bool = False,
     timeline_failure: bool = False,
+    weeks: int = 1,
+    participant_measured_weeks: int | None = None,
 ) -> list[list[str]]:
     """Mock HTTP only; exercise provider parsing, cache and orchestration together."""
     calls: list[list[str]] = []
@@ -70,21 +78,21 @@ def mock_trends(
         if timeline_failure:
             return httpx.Response(500, text="timeline unavailable")
         keys = json.loads(request.url.params["req"])["keys"]
-        return httpx.Response(
-            200,
-            json={
-                "default": {
-                    "timelineData": [
-                        {
-                            "time": "1756684800",
-                            "formattedTime": "week",
-                            "value": [40] + [20] * (len(keys) - 1),
-                            "hasData": [not collapsed] + [not unmeasured] * (len(keys) - 1),
-                        }
-                    ]
-                }
-            },
+        measured_for_participant = (
+            weeks if participant_measured_weeks is None else participant_measured_weeks
         )
+        timeline_data = []
+        for index in range(weeks):
+            participant_has = (not unmeasured) and index < measured_for_participant
+            timeline_data.append(
+                {
+                    "time": str(1756684800 + index * 604800),
+                    "formattedTime": f"week{index}",
+                    "value": [40] + [20 if participant_has else 0] * (len(keys) - 1),
+                    "hasData": [not collapsed] + [participant_has] * (len(keys) - 1),
+                }
+            )
+        return httpx.Response(200, json={"default": {"timelineData": timeline_data}})
 
     router.get(EXPLORE_URL).mock(side_effect=explore)
     router.get(f"{WIDGETDATA_URL}/multiline").mock(side_effect=timeline)
@@ -113,7 +121,13 @@ def test_complete_uses_default_anchor_market_and_cached_batches(tmp_path: Path) 
     ]
     assert calls == [["anchor", "a", "b", "c", "d"], ["anchor", "e"]]
     assert result.to_wire() == cached.to_wire()
-    assert result.data.caveats == [RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT]
+    assert result.data.caveats == [
+        RELATIVE_CAVEAT,
+        RESOLUTION_CAVEAT,
+        STITCHING_CAVEAT,
+        COVERAGE_CAVEAT,
+    ]
+    assert result.data.min_coverage == 0.25
     assert result.warnings == result.errors == []
 
 
@@ -122,8 +136,10 @@ def test_caveat_constants_keep_their_exact_meaning() -> None:
         "Values are relative to the anchor, not absolute search volumes.",
         "The scale is tied to the anchor; much weaker keywords hit the anchor's resolution limit.",
         "Batches are stitched through the anchor; stitching error accumulates from batch to batch.",
+        "Values below the coverage threshold are not emitted as numbers; "
+        "the threshold is demand_min_coverage.",
     ]
-    caveats = [RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT]
+    caveats = [RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT, COVERAGE_CAVEAT]
     assert caveats == expected
 
 
@@ -352,3 +368,55 @@ def test_cli_table_and_notices(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert "FIELD\tVALUE" in result.stdout
     assert '"relative_demand": 50.0' in result.stdout
     assert "RELATED_QUERIES" in result.stderr
+
+
+def test_demand_min_coverage_defaults_to_a_quarter() -> None:
+    assert Settings().demand_min_coverage == 0.25
+
+
+def test_demand_min_coverage_accepts_the_closed_unit_interval() -> None:
+    assert Settings(demand_min_coverage=0.0).demand_min_coverage == 0.0
+    assert Settings(demand_min_coverage=1.0).demand_min_coverage == 1.0
+
+
+@pytest.mark.parametrize("value", [-0.01, 1.01])
+def test_demand_min_coverage_rejects_values_outside_unit_interval(value: float) -> None:
+    with pytest.raises(InvalidConfigurationError, match="demand_min_coverage"):
+        Settings(demand_min_coverage=value)
+
+
+def test_cut_coverage_row_makes_the_envelope_partial_and_exposes_min_coverage(
+    tmp_path: Path,
+) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router, weeks=5, participant_measured_weeks=1)
+        result = run_demand(settings_for(tmp_path), ["anchor", "thin"])
+    assert result.completeness is Completeness.PARTIAL
+    assert result.data is not None
+    assert result.data.min_coverage == 0.25
+    thin = next(row for row in result.data.rows if row.keyword == "thin")
+    assert thin.relative_demand is None
+    assert thin.status == DemandStatus.LOW_COVERAGE
+    assert COVERAGE_CAVEAT in result.data.caveats
+    assert result.data.caveats[-1] == COVERAGE_CAVEAT
+
+
+@pytest.mark.parametrize("value", ["-0.1", "1.5"])
+def test_invalid_demand_min_coverage_is_an_empty_envelope(tmp_path: Path, value: str) -> None:
+    environment = os.environ.copy()
+    environment["GKAI_DATA_DIR"] = str(tmp_path)
+    environment["GKAI_DEMAND_MIN_COVERAGE"] = value
+    completed = subprocess.run(
+        [sys.executable, "-m", "google_keyword_ai.cli.main", "demand", "ипотека", "новостройки"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+    assert completed.returncode == 1
+    envelope = json.loads(completed.stdout)
+    assert envelope["data"] is None
+    assert envelope["completeness"] == "empty"
+    reason = envelope["completeness_reason"]
+    assert isinstance(reason, str)
+    assert "demand_min_coverage" in reason

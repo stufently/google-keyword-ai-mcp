@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     trends_cache_ttl_seconds: int = 21600
     trends_circuit_breaker_failures: int = 3
     trends_timezone_minutes: int = -180
+    demand_min_coverage: float = 0.25
     cache_enabled: bool = True
     cache_sweep_enabled: bool = Field(
         default=True,
@@ -235,6 +236,15 @@ class Settings(BaseSettings):
         if not 0 < value <= 1:
             raise InvalidConfigurationError(
                 "cluster_similarity_threshold must be above 0 and at most 1."
+            )
+        return value
+
+    @field_validator("demand_min_coverage")
+    @classmethod
+    def validate_demand_min_coverage(cls, value: float) -> float:
+        if not 0.0 <= value <= 1.0:
+            raise InvalidConfigurationError(
+                "demand_min_coverage must be between 0.0 and 1.0 inclusive."
             )
         return value
 

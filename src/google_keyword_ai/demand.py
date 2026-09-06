@@ -2,6 +2,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from statistics import fmean
 
 from pydantic import BaseModel
@@ -14,9 +15,18 @@ MAX_DEMAND_KEYWORDS = 50
 KEYWORDS_PER_BATCH = 4
 
 
+class DemandStatus(StrEnum):
+    MEASURED = "measured"
+    LOW_COVERAGE = "low_coverage"
+    BELOW_RESOLUTION = "below_resolution"
+    ANCHOR_COLLAPSED = "anchor_collapsed"
+    BATCH_FAILED = "batch_failed"
+
+
 class DemandRow(BaseModel):
     keyword: str
     relative_demand: float | None
+    status: DemandStatus
     is_anchor: bool
     batch: int
     measured_weeks: int
@@ -74,7 +84,13 @@ def measured_mean(result: TrendsResult, keyword: str) -> float | None:
     return fmean(values) if values else None
 
 
-def _batch_rows(batch: DemandBatch, number: int) -> list[DemandRow]:
+def _coverage(measured_weeks: int, weeks: int) -> float:
+    if weeks == 0:
+        return 0.0
+    return measured_weeks / weeks
+
+
+def _batch_rows(batch: DemandBatch, number: int, min_coverage: float) -> list[DemandRow]:
     anchor = batch.keywords[0]
     result = batch.result
     anchor_mean = measured_mean(result, anchor) if result is not None else None
@@ -84,17 +100,21 @@ def _batch_rows(batch: DemandBatch, number: int) -> list[DemandRow]:
         relative: float | None = None
         reason: str | None = None
         measured = len(_measured_values(result, keyword)) if result is not None else 0
+        is_anchor = keyword == anchor
         if result is None:
             reason = batch.reason
             if not reason:
                 raise ValueError("A missing demand batch requires the provider's failure reason.")
+            status = DemandStatus.BATCH_FAILED
         elif anchor_mean is None or anchor_mean == 0:
             reason = (
                 f"Anchor '{anchor}' collapsed: no measured whole weeks or zero mean; "
                 "this batch cannot be placed on the common scale."
             )
-        elif keyword == anchor:
+            status = DemandStatus.ANCHOR_COLLAPSED
+        elif is_anchor:
             relative = 100.0
+            status = DemandStatus.MEASURED
         else:
             mean = measured_mean(result, keyword)
             if mean is None:
@@ -102,13 +122,24 @@ def _batch_rows(batch: DemandBatch, number: int) -> list[DemandRow]:
                     f"Google returned no measured whole weeks for '{keyword}' beside anchor "
                     f"'{anchor}': below the anchor's resolution, not zero demand."
                 )
+                status = DemandStatus.BELOW_RESOLUTION
             else:
                 relative = mean / anchor_mean * 100
+                status = DemandStatus.MEASURED
+        coverage = _coverage(measured, weeks)
+        if relative is not None and not is_anchor and coverage < min_coverage:
+            relative = None
+            status = DemandStatus.LOW_COVERAGE
+            reason = (
+                f"Insufficient coverage for '{keyword}': {measured} of {weeks} whole weeks "
+                f"measured, below the {min_coverage} coverage threshold; this is not low demand."
+            )
         rows.append(
             DemandRow(
                 keyword=keyword,
                 relative_demand=relative,
-                is_anchor=keyword == anchor,
+                status=status,
+                is_anchor=is_anchor,
                 batch=number,
                 measured_weeks=measured,
                 weeks=weeks,
@@ -118,16 +149,18 @@ def _batch_rows(batch: DemandBatch, number: int) -> list[DemandRow]:
     return rows
 
 
-def combine(batches: Sequence[DemandBatch]) -> list[DemandRow]:
+def combine(batches: Sequence[DemandBatch], *, min_coverage: float = 0.0) -> list[DemandRow]:
     """Scale each batch against its own anchor mean and stably rank its rows.
 
     Emit the anchor once, using the first usable batch's coverage. If every
     anchor collapsed or failed, keep the first batch's null anchor and reason.
+    A participant whose measured-week share is below `min_coverage` is not
+    emitted as a number; 0.0 disables the threshold. The anchor is never cut.
     """
     rows: list[DemandRow] = []
     anchor_row: DemandRow | None = None
     for number, batch in enumerate(batches, start=1):
-        for row in _batch_rows(batch, number):
+        for row in _batch_rows(batch, number, min_coverage):
             if row.is_anchor:
                 if anchor_row is None:
                     anchor_row = row

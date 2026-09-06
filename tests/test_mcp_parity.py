@@ -767,7 +767,7 @@ def test_research_over_mcp_can_save_a_run_and_bound_its_cost(
 def test_rank_keyword_demand_matches_cli_wire_envelope(
     monkeypatch: pytest.MonkeyPatch, refused: bool
 ) -> None:
-    from google_keyword_ai.demand import DemandRow
+    from google_keyword_ai.demand import DemandRow, DemandStatus
     from google_keyword_ai.envelope import Completeness
     from google_keyword_ai.usecases.demand import DemandData
 
@@ -787,10 +787,12 @@ def test_rank_keyword_demand_matches_cli_wire_envelope(
                 language="ru",
                 country="RU",
                 timeframe="today 3-m",
+                min_coverage=0.25,
                 rows=[
                     DemandRow(
                         keyword="one",
                         relative_demand=100.0,
+                        status=DemandStatus.MEASURED,
                         is_anchor=True,
                         batch=1,
                         measured_weeks=53,
@@ -800,6 +802,7 @@ def test_rank_keyword_demand_matches_cli_wire_envelope(
                     DemandRow(
                         keyword="two",
                         relative_demand=None,
+                        status=DemandStatus.BELOW_RESOLUTION,
                         is_anchor=False,
                         batch=1,
                         measured_weeks=0,

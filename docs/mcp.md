@@ -38,10 +38,10 @@ uv run --all-extras python -c "from google_keyword_ai.config import Settings; fr
 timeframe="today 12-m")` compares 2–50 unique keywords through a shared Trends
 anchor (the first keyword by default). Its synchronous implementation returns
 `Envelope[DemandData | None]`, matching `gkai demand`. Values are percentages of
-the anchor, not search volumes; unmeasured keywords and failed batches carry
-`null` plus a reason. Unused-widget messages travel in `data.notices`, outside
-the envelope's `warnings`, and do not downgrade completeness. See
-[the method and limitations](demand.md).
+the anchor, not search volumes; unmeasured keywords, thin coverage and failed
+batches carry `null` plus a `status` and a reason. Unused-widget messages travel
+in `data.notices`, outside the envelope's `warnings`, and do not downgrade
+completeness. See [the method and limitations](demand.md).
 
 ## Claude Code
 

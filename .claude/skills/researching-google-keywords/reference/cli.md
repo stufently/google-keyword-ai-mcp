@@ -83,7 +83,8 @@ with that anchor, then scales their measured whole-week means to anchor = 100.
 `--format` supports `json` and `table`. These are relative values, not absolute
 search volumes. A broad anchor can push weaker keywords below the scale's
 resolution: `null` means unmeasured or failed, not zero demand. Read each row's
-coverage and `reason`, and the three `data.caveats`.
+`status`, coverage and `reason`, and `data.caveats`. Values below
+`GKAI_DEMAND_MIN_COVERAGE` (default 0.25) are not emitted as numbers.
 
 Messages about unused Trends widgets are `data.notices` and are also printed on
 stderr after the envelope; they do not make a healthy demand answer partial.

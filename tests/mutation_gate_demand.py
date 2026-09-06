@@ -1,4 +1,4 @@
-"""Ten reversible demand mutations. Run sequentially, never alongside edits/tests.
+"""Fifteen reversible demand mutations. Run sequentially, never alongside edits/tests.
 
 Each mutant must fail its own test at its designated assertion. Every target
 first passes on the original source, including when running with --only.
@@ -21,6 +21,7 @@ SOURCE = ROOT / "src/google_keyword_ai/demand.py"
 TEST_FILE = "tests/test_demand.py"
 USECASE_SOURCE = ROOT / "src/google_keyword_ai/usecases/demand.py"
 USECASE_TEST_FILE = "tests/test_demand_usecase.py"
+CONFIG_SOURCE = ROOT / "src/google_keyword_ai/config.py"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,43 @@ MUTATIONS = (
         'assert result.data.timeframe == "today 12-m"',
         source=USECASE_SOURCE,
         test_file=USECASE_TEST_FILE,
+    ),
+    Mutation(
+        "M11",
+        "coverage < min_coverage",
+        "coverage <= min_coverage",
+        "test_coverage_exactly_at_the_threshold_is_emitted",
+        "assert row.relative_demand == 200.0",
+    ),
+    Mutation(
+        "M12",
+        "relative is not None and not is_anchor and coverage < min_coverage",
+        "relative is not None and coverage < min_coverage",
+        "test_coverage_threshold_does_not_cut_the_anchor",
+        "assert anchor.relative_demand == 100.0",
+    ),
+    Mutation(
+        "M13",
+        "relative is not None and not is_anchor and coverage < min_coverage",
+        "not is_anchor and coverage < min_coverage",
+        "test_coverage_threshold_does_not_overwrite_an_existing_null_reason",
+        'assert "below the anchor\'s resolution" in row.reason',
+    ),
+    Mutation(
+        "M14",
+        "demand_min_coverage: float = 0.25",
+        "demand_min_coverage: float = 0.5",
+        "test_demand_min_coverage_defaults_to_a_quarter",
+        "assert Settings().demand_min_coverage == 0.25",
+        source=CONFIG_SOURCE,
+        test_file=USECASE_TEST_FILE,
+    ),
+    Mutation(
+        "M15",
+        "status = DemandStatus.LOW_COVERAGE",
+        "status = DemandStatus.BELOW_RESOLUTION",
+        "test_coverage_just_below_the_threshold_is_cut",
+        "assert row.status == DemandStatus.LOW_COVERAGE",
     ),
 )
 

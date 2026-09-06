@@ -31,6 +31,10 @@ RESOLUTION_CAVEAT = (
 STITCHING_CAVEAT = (
     "Batches are stitched through the anchor; stitching error accumulates from batch to batch."
 )
+COVERAGE_CAVEAT = (
+    "Values below the coverage threshold are not emitted as numbers; "
+    "the threshold is demand_min_coverage."
+)
 
 
 class DemandData(BaseModel):
@@ -39,6 +43,7 @@ class DemandData(BaseModel):
     language: str
     country: str
     timeframe: str
+    min_coverage: float
     rows: list[DemandRow]
     batches_requested: int
     batches_failed: int
@@ -93,10 +98,11 @@ async def _fetch_demand(
         language=market.language,
         country=market.country,
         timeframe=timeframe,
-        rows=combine(batches),
+        min_coverage=settings.demand_min_coverage,
+        rows=combine(batches, min_coverage=settings.demand_min_coverage),
         batches_requested=len(planned),
         batches_failed=sum(batch.result is None for batch in batches),
-        caveats=[RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT],
+        caveats=[RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT, COVERAGE_CAVEAT],
         notices=notices,
     )
     return data, warnings, errors

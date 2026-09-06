@@ -1,9 +1,9 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from google_keyword_ai.demand import DemandBatch, combine, measured_mean, plan_batches
+from google_keyword_ai.demand import DemandBatch, DemandStatus, combine, measured_mean, plan_batches
 from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 
@@ -27,7 +27,7 @@ def series(
         normalization_scope="synthetic",
         timeline=[
             TrendPoint(
-                timestamp=datetime(2026, 1, i + 1, tzinfo=UTC),
+                timestamp=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(weeks=i),
                 formatted_time=str(i),
                 values=row,
                 has_data=measured[i] if measured is not None else [True] * len(row),
@@ -234,3 +234,179 @@ def test_absent_keyword_or_missing_flags_has_no_measured_mean() -> None:
     result = series(["anchor"], [[20]], [[]])
     assert measured_mean(result, "anchor") is None
     assert measured_mean(result, "absent") is None
+
+
+def _coverage_pair(
+    weeks: int, participant_measured: int, *, anchor_measured: int | None = None
+) -> TrendsResult:
+    if anchor_measured is None:
+        anchor_measured = weeks
+    values: list[list[int]] = []
+    flags: list[list[bool]] = []
+    for index in range(weeks):
+        anchor_has = index < anchor_measured
+        participant_has = index < participant_measured
+        values.append([10 if anchor_has else 0, 20 if participant_has else 0])
+        flags.append([anchor_has, participant_has])
+    return series(["anchor", "thin"], values, flags)
+
+
+def test_coverage_exactly_at_the_threshold_is_emitted() -> None:
+    result = _coverage_pair(4, 1)
+    row = next(
+        item
+        for item in combine(
+            [DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25
+        )
+        if item.keyword == "thin"
+    )
+    assert row.relative_demand == 200.0
+    assert (row.measured_weeks, row.weeks) == (1, 4)
+    assert row.status == DemandStatus.MEASURED
+    assert row.reason is None
+
+
+def test_coverage_just_below_the_threshold_is_cut() -> None:
+    result = _coverage_pair(5, 1)
+    row = next(
+        item
+        for item in combine(
+            [DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25
+        )
+        if item.keyword == "thin"
+    )
+    assert row.relative_demand is None
+    assert row.status == DemandStatus.LOW_COVERAGE
+    assert row.reason is not None
+    assert "1" in row.reason
+    assert "5" in row.reason
+    assert "0.25" in row.reason
+    assert "coverage" in row.reason.lower()
+    assert "not low demand" in row.reason.lower()
+
+
+def test_disabled_coverage_threshold_does_not_cut_a_single_week() -> None:
+    result = _coverage_pair(53, 1)
+    for rows in (
+        combine([DemandBatch(keywords=result.keywords, result=result)]),
+        combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.0),
+    ):
+        row = next(item for item in rows if item.keyword == "thin")
+        assert row.relative_demand == 200.0
+        assert (row.measured_weeks, row.weeks) == (1, 53)
+        assert row.status == DemandStatus.MEASURED
+
+
+def test_coverage_threshold_does_not_overwrite_an_existing_null_reason() -> None:
+    result = series(["anchor", "small"], [[50, 0]], [[True, False]])
+    row = combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25)[1]
+    assert row.relative_demand is None
+    assert row.reason is not None
+    assert "below the anchor's resolution" in row.reason
+    assert "not zero demand" in row.reason
+    assert row.status == DemandStatus.BELOW_RESOLUTION
+
+
+def test_coverage_threshold_does_not_cut_the_anchor() -> None:
+    result = _coverage_pair(53, 1, anchor_measured=1)
+    rows = combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25)
+    anchor = next(item for item in rows if item.is_anchor)
+    thin = next(item for item in rows if item.keyword == "thin")
+    assert anchor.relative_demand == 100.0
+    assert anchor.status == DemandStatus.MEASURED
+    assert (anchor.measured_weeks, anchor.weeks) == (1, 53)
+    assert thin.relative_demand is None
+    assert thin.status == DemandStatus.LOW_COVERAGE
+
+
+def test_zero_weeks_coverage_does_not_divide() -> None:
+    result = series(["anchor", "other"], [[10, 5]], partial=[True])
+    rows = combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25)
+    assert all(row.relative_demand is None for row in rows)
+    assert all(row.weeks == 0 for row in rows)
+    assert all(row.status is DemandStatus.ANCHOR_COLLAPSED for row in rows)
+
+
+def test_each_demand_status_has_its_own_case() -> None:
+    failed_reason = "Google refused this request: 429"
+    healthy = series(["anchor", "ok"], [[40, 20], [60, 30]])
+    thin = _coverage_pair(5, 1)
+    unmeasured = series(["anchor", "small"], [[50, 0]], [[True, False]])
+    collapsed = series(["anchor", "ghost"], [[0, 30]], [[False, True]])
+    rows = combine(
+        [
+            DemandBatch(keywords=["anchor", "lost"], reason=failed_reason),
+            DemandBatch(keywords=healthy.keywords, result=healthy),
+            DemandBatch(keywords=thin.keywords, result=thin),
+            DemandBatch(keywords=unmeasured.keywords, result=unmeasured),
+            DemandBatch(keywords=collapsed.keywords, result=collapsed),
+        ],
+        min_coverage=0.25,
+    )
+    by_key = {row.keyword: row for row in rows}
+    assert by_key["anchor"].status == DemandStatus.MEASURED
+    assert by_key["anchor"].relative_demand == 100.0
+    assert by_key["ok"].status == DemandStatus.MEASURED
+    assert by_key["ok"].relative_demand == 50.0
+    assert by_key["thin"].status == DemandStatus.LOW_COVERAGE
+    assert by_key["thin"].relative_demand is None
+    assert by_key["small"].status == DemandStatus.BELOW_RESOLUTION
+    assert by_key["small"].relative_demand is None
+    assert by_key["small"].reason is not None
+    assert "below the anchor's resolution" in by_key["small"].reason
+    assert by_key["lost"].status == DemandStatus.BATCH_FAILED
+    assert by_key["lost"].reason == failed_reason
+    assert by_key["ghost"].status == DemandStatus.ANCHOR_COLLAPSED
+    assert by_key["ghost"].relative_demand is None
+
+
+def test_zero_coverage_prefers_below_resolution_over_low_coverage() -> None:
+    result = series(["anchor", "small"], [[50, 0]], [[True, False]])
+    row = combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25)[1]
+    assert row.measured_weeks == 0
+    assert row.relative_demand is None
+    assert row.status == DemandStatus.BELOW_RESOLUTION
+    assert row.reason is not None
+    assert "below the anchor's resolution" in row.reason
+    assert "coverage threshold" not in row.reason
+
+
+def test_measured_zero_keeps_measured_status() -> None:
+    result = series(["anchor", "zero"], [[10, 0]])
+    row = combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25)[1]
+    assert row.relative_demand == 0.0
+    assert row.status == DemandStatus.MEASURED
+    assert row.reason is None
+
+
+def test_fixture_coverage_passes_the_default_threshold() -> None:
+    a = fixture("batch_a.json")
+    b = fixture("batch_b.json")
+    rows = combine(
+        [
+            DemandBatch(keywords=["ипотека", "новостройки"], result=a),
+            DemandBatch(keywords=["ипотека", "новостройки"], result=b),
+        ],
+        min_coverage=0.25,
+    )
+    anchor = next(row for row in rows if row.is_anchor)
+    assert anchor.relative_demand == 100.0
+    assert all(row.measured_weeks == 53 and row.weeks == 53 for row in rows)
+    assert all(
+        row.status == DemandStatus.MEASURED for row in rows if row.relative_demand is not None
+    )
+
+
+def test_fixture_coverage_passes_when_threshold_is_disabled() -> None:
+    a = fixture("batch_a.json")
+    b = fixture("batch_b.json")
+    rows = combine(
+        [
+            DemandBatch(keywords=["ипотека", "новостройки"], result=a),
+            DemandBatch(keywords=["ипотека", "новостройки"], result=b),
+        ],
+        min_coverage=0.0,
+    )
+    anchor = next(row for row in rows if row.is_anchor)
+    assert anchor.relative_demand == 100.0
+    assert all(row.measured_weeks == 53 and row.weeks == 53 for row in rows)
