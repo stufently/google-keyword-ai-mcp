@@ -809,6 +809,16 @@ def test_rank_keyword_demand_matches_cli_wire_envelope(
                         weeks=53,
                         reason="below anchor resolution",
                     ),
+                    DemandRow(
+                        keyword="zero",
+                        relative_demand=0.0,
+                        status=DemandStatus.MEASURED,
+                        is_anchor=False,
+                        batch=1,
+                        measured_weeks=53,
+                        weeks=53,
+                        reason=None,
+                    ),
                 ],
                 batches_requested=1,
                 batches_failed=0,
@@ -895,8 +905,27 @@ def test_rank_keyword_demand_matches_cli_wire_envelope(
         ],
     )
     assert cli_result.exit_code == 1
-    assert mcp_payload == json.loads(cli_result.stdout) == expected.to_wire()
+    cli_wire = json.loads(cli_result.stdout)
+    assert mcp_payload == cli_wire == expected.to_wire()
     if not refused:
         assert cli_result.output.index("timeline coverage is sparse") < cli_result.output.rindex(
             "Notice:"
         )
+        cli_data = cli_wire["data"]
+        assert isinstance(cli_data, dict)
+        cli_rows = cli_data["rows"]
+        assert isinstance(cli_rows, list)
+        zero = next(row for row in cli_rows if isinstance(row, dict) and row["keyword"] == "zero")
+        assert zero["relative_demand"] == 0.0
+        assert zero["status"] == "measured"
+        assert "status" in zero
+        mcp_data = mcp_payload["data"]
+        assert isinstance(mcp_data, dict)
+        mcp_rows = mcp_data["rows"]
+        assert isinstance(mcp_rows, list)
+        mcp_zero = next(
+            row for row in mcp_rows if isinstance(row, dict) and row["keyword"] == "zero"
+        )
+        assert mcp_zero["relative_demand"] == 0.0
+        assert mcp_zero["status"] == "measured"
+        assert "status" in mcp_zero

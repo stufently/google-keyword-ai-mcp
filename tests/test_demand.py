@@ -3,7 +3,14 @@ from pathlib import Path
 
 import pytest
 
-from google_keyword_ai.demand import DemandBatch, DemandStatus, combine, measured_mean, plan_batches
+from google_keyword_ai.demand import (
+    DemandBatch,
+    DemandStatus,
+    _coverage,
+    combine,
+    measured_mean,
+    plan_batches,
+)
 from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
 
@@ -237,7 +244,11 @@ def test_absent_keyword_or_missing_flags_has_no_measured_mean() -> None:
 
 
 def _coverage_pair(
-    weeks: int, participant_measured: int, *, anchor_measured: int | None = None
+    weeks: int,
+    participant_measured: int,
+    *,
+    anchor_measured: int | None = None,
+    participant_value: int = 20,
 ) -> TrendsResult:
     if anchor_measured is None:
         anchor_measured = weeks
@@ -246,7 +257,7 @@ def _coverage_pair(
     for index in range(weeks):
         anchor_has = index < anchor_measured
         participant_has = index < participant_measured
-        values.append([10 if anchor_has else 0, 20 if participant_has else 0])
+        values.append([10 if anchor_has else 0, participant_value if participant_has else 0])
         flags.append([anchor_has, participant_has])
     return series(["anchor", "thin"], values, flags)
 
@@ -278,6 +289,7 @@ def test_coverage_just_below_the_threshold_is_cut() -> None:
     assert row.relative_demand is None
     assert row.status == DemandStatus.LOW_COVERAGE
     assert row.reason is not None
+    assert "1 of 5 whole weeks" in row.reason
     assert "1" in row.reason
     assert "5" in row.reason
     assert "0.25" in row.reason
@@ -320,6 +332,14 @@ def test_coverage_threshold_does_not_cut_the_anchor() -> None:
 
 
 def test_zero_weeks_coverage_does_not_divide() -> None:
+    failure = None
+    coverage = None
+    try:
+        coverage = _coverage(0, 0)
+    except ZeroDivisionError as exc:
+        failure = exc
+    assert failure is None
+    assert coverage == 0.0
     result = series(["anchor", "other"], [[10, 5]], partial=[True])
     rows = combine([DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25)
     assert all(row.relative_demand is None for row in rows)
@@ -410,3 +430,77 @@ def test_fixture_coverage_passes_when_threshold_is_disabled() -> None:
     anchor = next(row for row in rows if row.is_anchor)
     assert anchor.relative_demand == 100.0
     assert all(row.measured_weeks == 53 and row.weeks == 53 for row in rows)
+
+
+def test_demand_status_protocol_literals_are_fixed() -> None:
+    assert DemandStatus.MEASURED.value == "measured"
+    assert DemandStatus.LOW_COVERAGE.value == "low_coverage"
+    assert DemandStatus.BELOW_RESOLUTION.value == "below_resolution"
+    assert DemandStatus.ANCHOR_COLLAPSED.value == "anchor_collapsed"
+    assert DemandStatus.BATCH_FAILED.value == "batch_failed"
+    assert {member.value for member in DemandStatus} == {
+        "measured",
+        "low_coverage",
+        "below_resolution",
+        "anchor_collapsed",
+        "batch_failed",
+    }
+
+
+def test_thin_measured_zero_is_cut_until_threshold_is_disabled() -> None:
+    result = _coverage_pair(5, 1, participant_value=0)
+    row = next(
+        item
+        for item in combine(
+            [DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.25
+        )
+        if item.keyword == "thin"
+    )
+    assert row.relative_demand is None
+    assert row.status == "low_coverage"
+    assert row.reason is not None
+    assert "1 of 5 whole weeks" in row.reason
+    disabled = next(
+        item
+        for item in combine(
+            [DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.0
+        )
+        if item.keyword == "thin"
+    )
+    assert disabled.relative_demand == 0.0
+    assert disabled.status == "measured"
+
+
+def test_coverage_fraction_is_not_rounded_before_the_threshold() -> None:
+    cut = _coverage_pair(1000, 249)
+    row = next(
+        item
+        for item in combine([DemandBatch(keywords=cut.keywords, result=cut)], min_coverage=0.25)
+        if item.keyword == "thin"
+    )
+    assert row.relative_demand is None
+    assert row.status == "low_coverage"
+    kept = _coverage_pair(1000, 250)
+    kept_row = next(
+        item
+        for item in combine([DemandBatch(keywords=kept.keywords, result=kept)], min_coverage=0.25)
+        if item.keyword == "thin"
+    )
+    assert kept_row.relative_demand == 200.0
+    assert kept_row.status == "measured"
+
+
+def test_combine_uses_the_min_coverage_argument_not_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("GKAI_DEMAND_MIN_COVERAGE", "0.9")
+    result = _coverage_pair(53, 1)
+    row = next(
+        item
+        for item in combine(
+            [DemandBatch(keywords=result.keywords, result=result)], min_coverage=0.0
+        )
+        if item.keyword == "thin"
+    )
+    assert row.relative_demand == 200.0
+    assert row.status == "measured"

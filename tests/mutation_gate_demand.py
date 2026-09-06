@@ -1,4 +1,4 @@
-"""Fifteen reversible demand mutations. Run sequentially, never alongside edits/tests.
+"""Twenty-one reversible demand mutations. Run sequentially, never alongside edits/tests.
 
 Each mutant must fail its own test at its designated assertion. Every target
 first passes on the original source, including when running with --only.
@@ -150,6 +150,53 @@ MUTATIONS = (
         "status = DemandStatus.BELOW_RESOLUTION",
         "test_coverage_just_below_the_threshold_is_cut",
         "assert row.status == DemandStatus.LOW_COVERAGE",
+    ),
+    Mutation(
+        "M16",
+        "numeric = sum(row.relative_demand is not None for row in data.rows)",
+        "numeric = sum(1 for row in data.rows if row.relative_demand)",
+        "test_measured_zero_keeps_the_envelope_complete",
+        "assert result.completeness is Completeness.COMPLETE",
+        source=USECASE_SOURCE,
+        test_file=USECASE_TEST_FILE,
+    ),
+    Mutation(
+        "M17",
+        "relative_demand=relative,",
+        "relative_demand=relative or None,",
+        "test_measured_zero_survives_combine_usecase_cli_and_mcp",
+        'assert zero["relative_demand"] == 0.0',
+        test_file=USECASE_TEST_FILE,
+    ),
+    Mutation(
+        "M18",
+        "if relative is not None and not is_anchor and coverage < min_coverage:",
+        "if relative and not is_anchor and coverage < min_coverage:",
+        "test_thin_measured_zero_is_cut_until_threshold_is_disabled",
+        "assert row.relative_demand is None",
+    ),
+    Mutation(
+        "M19",
+        "rows=combine(batches, min_coverage=settings.demand_min_coverage),",
+        "rows=combine(batches, min_coverage=0.25),",
+        "test_usecase_zero_threshold_emits_a_single_week_of_fifty_three",
+        "assert thin.relative_demand == 50.0",
+        source=USECASE_SOURCE,
+        test_file=USECASE_TEST_FILE,
+    ),
+    Mutation(
+        "M20",
+        "coverage < min_coverage",
+        "round(coverage, 2) < min_coverage",
+        "test_coverage_fraction_is_not_rounded_before_the_threshold",
+        "assert row.relative_demand is None",
+    ),
+    Mutation(
+        "M21",
+        'MEASURED = "measured"',
+        'MEASURED = "observed"',
+        "test_demand_status_protocol_literals_are_fixed",
+        'assert DemandStatus.MEASURED.value == "measured"',
     ),
 )
 

@@ -29,12 +29,13 @@ from google_keyword_ai.usecases.demand import (
 )
 
 
-def settings_for(tmp_path: Path) -> Settings:
+def settings_for(tmp_path: Path, *, min_coverage: float = 0.25) -> Settings:
     return Settings(
         data_dir=tmp_path,
         http_max_attempts=1,
         trends_pacing_seconds=0.001,
         trends_circuit_breaker_failures=20,
+        demand_min_coverage=min_coverage,
     )
 
 
@@ -48,6 +49,7 @@ def mock_trends(
     timeline_failure: bool = False,
     weeks: int = 1,
     participant_measured_weeks: int | None = None,
+    participant_value: int = 20,
 ) -> list[list[str]]:
     """Mock HTTP only; exercise provider parsing, cache and orchestration together."""
     calls: list[list[str]] = []
@@ -88,7 +90,7 @@ def mock_trends(
                 {
                     "time": str(1756684800 + index * 604800),
                     "formattedTime": f"week{index}",
-                    "value": [40] + [20 if participant_has else 0] * (len(keys) - 1),
+                    "value": [40] + [participant_value if participant_has else 0] * (len(keys) - 1),
                     "hasData": [not collapsed] + [participant_has] * (len(keys) - 1),
                 }
             )
@@ -162,7 +164,10 @@ def test_cli_default_timeframe_reaches_data_and_http(
         result = CliRunner().invoke(cli_main.app, ["demand", "anchor", "other"])
         request = router.get(EXPLORE_URL).calls[0].request
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["data"]["timeframe"] == "today 12-m"
+    payload = json.loads(result.stdout)
+    assert payload["data"]["timeframe"] == "today 12-m"
+    assert "status" in payload["data"]["rows"][0]
+    assert payload["data"]["rows"][0]["status"] == "measured"
     assert json.loads(request.url.params["req"])["comparisonItem"][0]["time"] == "today 12-m"
 
 
@@ -207,6 +212,12 @@ def test_mcp_default_timeframe_reaches_data_and_http(tmp_path: Path) -> None:
     data = result["data"]
     assert isinstance(data, dict)
     assert data["timeframe"] == "today 12-m"
+    rows = data["rows"]
+    assert isinstance(rows, list)
+    first = rows[0]
+    assert isinstance(first, dict)
+    assert "status" in first
+    assert first["status"] == "measured"
     assert json.loads(request.url.params["req"])["comparisonItem"][0]["time"] == "today 12-m"
 
 
@@ -375,8 +386,20 @@ def test_demand_min_coverage_defaults_to_a_quarter() -> None:
 
 
 def test_demand_min_coverage_accepts_the_closed_unit_interval() -> None:
-    assert Settings(demand_min_coverage=0.0).demand_min_coverage == 0.0
-    assert Settings(demand_min_coverage=1.0).demand_min_coverage == 1.0
+    failure = None
+    try:
+        lower = Settings(demand_min_coverage=0.0)
+    except Exception as exc:
+        failure = exc
+    assert failure is None
+    assert lower.demand_min_coverage == 0.0
+    failure = None
+    try:
+        upper = Settings(demand_min_coverage=1.0)
+    except Exception as exc:
+        failure = exc
+    assert failure is None
+    assert upper.demand_min_coverage == 1.0
 
 
 @pytest.mark.parametrize("value", [-0.01, 1.01])
@@ -420,3 +443,101 @@ def test_invalid_demand_min_coverage_is_an_empty_envelope(tmp_path: Path, value:
     reason = envelope["completeness_reason"]
     assert isinstance(reason, str)
     assert "demand_min_coverage" in reason
+
+
+def test_measured_zero_keeps_the_envelope_complete(tmp_path: Path) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router, participant_value=0)
+        result = run_demand(settings_for(tmp_path), ["anchor", "zero"])
+    assert result.completeness is Completeness.COMPLETE
+    assert result.data is not None
+    zero = next(row for row in result.data.rows if row.keyword == "zero")
+    assert zero.relative_demand == 0.0
+    assert zero.status == "measured"
+
+
+def test_usecase_zero_threshold_emits_a_single_week_of_fifty_three(tmp_path: Path) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router, weeks=53, participant_measured_weeks=1)
+        result = run_demand(settings_for(tmp_path, min_coverage=0.0), ["anchor", "thin"])
+    assert result.data is not None
+    assert result.data.min_coverage == 0.0
+    thin = next(row for row in result.data.rows if row.keyword == "thin")
+    assert thin.relative_demand == 50.0
+    assert thin.status == "measured"
+    assert result.completeness is Completeness.COMPLETE
+
+
+def test_usecase_half_threshold_cuts_one_of_four_weeks(tmp_path: Path) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router, weeks=4, participant_measured_weeks=1)
+        result = run_demand(settings_for(tmp_path, min_coverage=0.5), ["anchor", "thin"])
+    assert result.completeness is Completeness.PARTIAL
+    assert result.data is not None
+    assert result.data.min_coverage == 0.5
+    thin = next(row for row in result.data.rows if row.keyword == "thin")
+    assert thin.relative_demand is None
+    assert thin.status == "low_coverage"
+
+
+def test_measured_zero_survives_combine_usecase_cli_and_mcp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = settings_for(tmp_path)
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    server = build_server(settings)
+
+    async def call_demand() -> dict[str, object]:
+        with anyio.fail_after(10):
+            async with (
+                create_client_server_memory_streams() as (
+                    (client_read, client_write),
+                    (server_read, server_write),
+                ),
+                anyio.create_task_group() as task_group,
+            ):
+                low_level_server = server._lowlevel_server
+
+                async def run_server() -> None:
+                    await low_level_server.run(
+                        server_read,
+                        server_write,
+                        low_level_server.create_initialization_options(),
+                        raise_exceptions=True,
+                    )
+
+                task_group.start_soon(run_server)
+                async with ClientSession(client_read, client_write) as client:
+                    await client.initialize()
+                    result = await client.call_tool(
+                        "rank_keyword_demand", {"keywords": ["anchor", "zero"]}
+                    )
+                task_group.cancel_scope.cancel()
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router, participant_value=0)
+        cli_result = CliRunner().invoke(cli_main.app, ["demand", "anchor", "zero"])
+        mcp_payload = anyio.run(call_demand)
+    cli_wire = json.loads(cli_result.stdout)
+    cli_data = cli_wire["data"]
+    assert isinstance(cli_data, dict)
+    cli_rows = cli_data["rows"]
+    assert isinstance(cli_rows, list)
+    zero = next(row for row in cli_rows if isinstance(row, dict) and row["keyword"] == "zero")
+    assert zero["relative_demand"] == 0.0
+    assert zero["status"] == "measured"
+    assert "status" in zero
+    assert cli_wire["completeness"] == "complete"
+    assert cli_result.exit_code == 0
+    mcp_data = mcp_payload["data"]
+    assert isinstance(mcp_data, dict)
+    mcp_rows = mcp_data["rows"]
+    assert isinstance(mcp_rows, list)
+    mcp_zero = next(row for row in mcp_rows if isinstance(row, dict) and row["keyword"] == "zero")
+    assert mcp_zero["relative_demand"] == 0.0
+    assert mcp_zero["status"] == "measured"
+    assert "status" in mcp_zero
+    assert mcp_payload["completeness"] == "complete"
