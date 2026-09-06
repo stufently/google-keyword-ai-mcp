@@ -1,4 +1,5 @@
 import builtins
+import json
 import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -16,7 +17,7 @@ from google.api_core.exceptions import InternalServerError, Unauthenticated
 from pydantic import SecretStr
 from sqlalchemy.engine import Engine
 
-from google_keyword_ai.cache import SqliteCache
+from google_keyword_ai.cache import PARSER_VERSION, SqliteCache, build_cache_key
 from google_keyword_ai.config import Settings
 from google_keyword_ai.errors import (
     ApiError,
@@ -26,7 +27,15 @@ from google_keyword_ai.errors import (
     RateLimitError,
 )
 from google_keyword_ai.market import Market
-from google_keyword_ai.providers.google_ads import AdsSeed, GoogleAdsProvider, KeywordIdeaPage
+from google_keyword_ai.providers.google_ads import (
+    _IDEAS_ADAPTER,
+    IDEAS_ENDPOINT,
+    AdsSeed,
+    GoogleAdsProvider,
+    KeywordIdea,
+    KeywordIdeaPage,
+    KeywordMetrics,
+)
 from google_keyword_ai.ratelimit import InterProcessRateLimiter
 from google_keyword_ai.storage.engine import open_database
 
@@ -472,6 +481,35 @@ def _run_paged_ideas(
         engine.dispose()
 
 
+def _run_paged_ideas_under_caps(
+    tmp_path: Path,
+    *,
+    pages: int,
+    caps: tuple[int, ...],
+) -> tuple[list[KeywordIdeaPage], PagedService]:
+    settings = _credentials(tmp_path / "data")
+    engine = open_database(settings)
+    service = PagedService(pages=pages)
+    limiter = CountingRateLimiter(settings.data_dir / "ads.lock")
+    results: list[KeywordIdeaPage] = []
+    try:
+        for cap in caps:
+            provider = GoogleAdsProvider(
+                settings=settings.model_copy(update={"google_ads_max_pages": cap}),
+                cache=SqliteCache(engine, settings),
+                rate_limiter=limiter,
+                service_factory=lambda: service,
+            )
+            results.append(
+                anyio.run(
+                    provider.keyword_ideas, AdsSeed(keywords=["keyword"]), Market.parse("en", "US")
+                )
+            )
+        return results, service
+    finally:
+        engine.dispose()
+
+
 def test_keyword_ideas_fetch_only_max_pages(tmp_path: Path) -> None:
     _page, service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3)
 
@@ -521,10 +559,105 @@ def test_last_page_at_the_cap_is_not_truncated(tmp_path: Path) -> None:
     assert page.truncation_reason is None
 
 
-def test_truncated_keyword_ideas_are_not_cached(tmp_path: Path) -> None:
-    _page, service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3, calls=2)
+def test_a_raised_cap_is_not_served_the_smaller_caps_answer(tmp_path: Path) -> None:
+    _pages, service = _run_paged_ideas_under_caps(tmp_path, pages=5, caps=(2, 4))
 
     assert len(service.calls) == 2
+
+
+def test_a_raised_cap_reads_the_pages_the_smaller_cap_skipped(tmp_path: Path) -> None:
+    pages, _service = _run_paged_ideas_under_caps(tmp_path, pages=5, caps=(2, 4))
+
+    assert [idea.text for idea in pages[1].ideas] == [
+        "keyword-0",
+        "keyword-1",
+        "keyword-2",
+        "keyword-3",
+    ]
+
+
+def test_truncated_keyword_ideas_are_cached_under_their_cap(tmp_path: Path) -> None:
+    _page, service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3, calls=2)
+
+    assert len(service.calls) == 1
+
+
+def test_a_cached_truncated_page_is_still_truncated(tmp_path: Path) -> None:
+    page, _service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3, calls=2)
+
+    assert page.truncated is True
+
+
+def test_a_cached_truncated_page_keeps_its_reason(tmp_path: Path) -> None:
+    page, _service, _limiter = _run_paged_ideas(tmp_path, pages=5, max_pages=3, calls=2)
+
+    assert page.truncation_reason is not None
+    assert "google_ads_max_pages" in page.truncation_reason
+
+
+def test_historical_metrics_ignore_the_page_cap(tmp_path: Path) -> None:
+    settings = _credentials(tmp_path / "data")
+    engine = open_database(settings)
+    service = FakeService()
+    try:
+        for cap in (2, 7):
+            provider = GoogleAdsProvider(
+                settings=settings.model_copy(update={"google_ads_max_pages": cap}),
+                cache=SqliteCache(engine, settings),
+                rate_limiter=ImmediateRateLimiter(settings.data_dir / "ads.lock"),
+                service_factory=lambda: service,
+            )
+            anyio.run(provider.historical_metrics, ["one"], Market.parse("en", "US"))
+    finally:
+        engine.dispose()
+
+    assert len(service.calls) == 1
+
+
+def test_a_pre_cap_cache_entry_is_missed_not_read(tmp_path: Path) -> None:
+    settings = _credentials(tmp_path / "data")
+    engine = open_database(settings)
+    service = FakeService()
+    seed = AdsSeed(keywords=["keyword"])
+    market = Market.parse("en", "US")
+    customer_id = settings.google_ads_customer_id
+    assert customer_id is not None
+    cache = SqliteCache(engine, settings)
+    stale = KeywordIdea(text="stale-from-old-cache", metrics=KeywordMetrics())
+    cache.set(
+        build_cache_key(
+            "google_ads",
+            IDEAS_ENDPOINT,
+            {
+                "seed": seed.model_dump_json(),
+                "mode": seed.mode(),
+                "language": market.language,
+                "country": market.country,
+                "include_adult": json.dumps(False),
+                "api_version": settings.google_ads_api_version,
+            },
+            account_scope=customer_id,
+            parser_version=PARSER_VERSION,
+        ),
+        provider="google_ads",
+        endpoint=IDEAS_ENDPOINT,
+        account_scope=customer_id,
+        parser_version=PARSER_VERSION,
+        payload=_IDEAS_ADAPTER.dump_json([stale], by_alias=False),
+        ttl_seconds=settings.google_ads_ideas_cache_ttl_seconds,
+    )
+    provider = GoogleAdsProvider(
+        settings=settings,
+        cache=cache,
+        rate_limiter=ImmediateRateLimiter(settings.data_dir / "ads.lock"),
+        service_factory=lambda: service,
+    )
+    try:
+        anyio.run(provider.keyword_ideas, seed, market)
+    finally:
+        engine.dispose()
+
+    assert len(service.calls) == 1
 
 
 def test_complete_keyword_ideas_remain_cached(tmp_path: Path) -> None:

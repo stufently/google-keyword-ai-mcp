@@ -35,8 +35,8 @@ ID so that accounts never see each other's data.
 Each ideas request asks for `google_ads_page_size` (default 1000) rows per
 page. The pager is walked at most `google_ads_max_pages` times (default 20,
 `GKAI_GOOGLE_ADS_MAX_PAGES`). Stopping at the ceiling marks the answer
-truncated and skips the cache: a partial page stored for a week would otherwise
-be served as complete, including to a later run with a higher ceiling.
+truncated and caches it with the ceiling in the key, so a later run that
+raises the ceiling does not receive the shorter answer.
 
 Country criteria IDs come from the official `geotargets-2026-08-12.csv`, and
 language IDs from the Google Ads `codes-formats` page; both were captured on

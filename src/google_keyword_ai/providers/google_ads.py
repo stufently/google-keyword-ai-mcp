@@ -107,6 +107,7 @@ class AdsSeed(BaseModel):
 
 
 _IDEAS_ADAPTER = TypeAdapter(list[KeywordIdea])
+_IDEAS_PAGE_ADAPTER = TypeAdapter(KeywordIdeaPage)
 
 
 def _client_setup_errors() -> tuple[type[BaseException], ...]:
@@ -362,6 +363,17 @@ class GoogleAdsProvider(Provider):
         except ValidationError as exc:
             raise ApiError("Google Ads cache entry is invalid.") from exc
 
+    def _cached_ideas_page(self, key: str) -> KeywordIdeaPage | None:
+        if self._cache is None:
+            raise ProviderUnavailableError("Google Ads cache is not configured.")
+        payload = self._cache.get(key)
+        if payload is None:
+            return None
+        try:
+            return _IDEAS_PAGE_ADAPTER.validate_json(payload)
+        except ValidationError as exc:
+            raise ApiError("Google Ads cache entry is invalid.") from exc
+
     def _store(
         self,
         key: str,
@@ -379,6 +391,26 @@ class GoogleAdsProvider(Provider):
             account_scope=customer_id,
             parser_version=PARSER_VERSION,
             payload=_IDEAS_ADAPTER.dump_json(ideas, by_alias=False),
+            ttl_seconds=ttl_seconds,
+        )
+
+    def _store_ideas_page(
+        self,
+        key: str,
+        endpoint: str,
+        customer_id: str,
+        page: KeywordIdeaPage,
+        ttl_seconds: int,
+    ) -> None:
+        if self._cache is None:
+            raise ProviderUnavailableError("Google Ads cache is not configured.")
+        self._cache.set(
+            key,
+            provider=self.info.name,
+            endpoint=endpoint,
+            account_scope=customer_id,
+            parser_version=PARSER_VERSION,
+            payload=_IDEAS_PAGE_ADAPTER.dump_json(page, by_alias=False),
             ttl_seconds=ttl_seconds,
         )
 
@@ -490,11 +522,12 @@ class GoogleAdsProvider(Provider):
             "language": market.language,
             "country": market.country,
             "include_adult": json.dumps(include_adult),
+            "max_pages": str(self._settings.google_ads_max_pages),
         }
         cache_key = self._cache_key(IDEAS_ENDPOINT, params, customer_id)
-        cached = self._cached(cache_key)
+        cached = self._cached_ideas_page(cache_key)
         if cached is not None:
-            return KeywordIdeaPage(ideas=cached, truncated=False, truncation_reason=None)
+            return cached
 
         request: dict[str, Any] = {
             "customer_id": customer_id,
@@ -521,17 +554,17 @@ class GoogleAdsProvider(Provider):
             raise ProviderUnavailableError("Google Ads rate limiter is not configured.")
         await self._rate_limiter.acquire()
         page = await self._call_ideas(self.build_service(), request)
-        # A truncated page is a cap, not a complete answer. Caching it for a
-        # week would serve the partial set as if it were full, including to a
-        # later run that raised google_ads_max_pages.
-        if not page.truncated:
-            self._store(
-                cache_key,
-                IDEAS_ENDPOINT,
-                customer_id,
-                page.ideas,
-                self._settings.google_ads_ideas_cache_ttl_seconds,
-            )
+        # The page cap is in the cache key, so a truncated answer is safe to
+        # store: a later run that raised google_ads_max_pages misses and walks
+        # the extra pages itself, instead of being served the short set as if
+        # it were full.
+        self._store_ideas_page(
+            cache_key,
+            IDEAS_ENDPOINT,
+            customer_id,
+            page,
+            self._settings.google_ads_ideas_cache_ttl_seconds,
+        )
         return page
 
     async def historical_metrics(
