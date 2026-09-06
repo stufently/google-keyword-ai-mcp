@@ -1,0 +1,2542 @@
+{
+  "geo": "RU",
+  "geo_interest": [
+    {
+      "geo_code": "RU-MOW",
+      "geo_name": "город Москва",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        52,
+        17,
+        20,
+        7,
+        4
+      ]
+    },
+    {
+      "geo_code": "RU-CHU",
+      "geo_name": "Чукотский автономный округ",
+      "has_data": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "values": [
+        54,
+        24,
+        22,
+        0,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KHA",
+      "geo_name": "Хабаровский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        49,
+        31,
+        15,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-MAG",
+      "geo_name": "Магаданская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        50,
+        33,
+        14,
+        2,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-YEV",
+      "geo_name": "Еврейская автономная область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "values": [
+        45,
+        35,
+        17,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-SAK",
+      "geo_name": "Сахалинская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        41,
+        34,
+        21,
+        3,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-YAN",
+      "geo_name": "Ямало-Ненецкий автономный округ",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        43,
+        26,
+        25,
+        6,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-NEN",
+      "geo_name": "Ненецкий автономный округ",
+      "has_data": [
+        true,
+        true,
+        true,
+        false,
+        false
+      ],
+      "values": [
+        45,
+        30,
+        25,
+        0,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KYA",
+      "geo_name": "Красноярский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        26,
+        23,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-SVE",
+      "geo_name": "Свердловская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        49,
+        21,
+        23,
+        6,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-PRI",
+      "geo_name": "Приморский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        38,
+        36,
+        23,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-NVS",
+      "geo_name": "Новосибирская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        25,
+        21,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-OMS",
+      "geo_name": "Омская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        54,
+        23,
+        19,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KHM",
+      "geo_name": "Ханты-Мансийский автономный округ",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        25,
+        21,
+        6,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-TOM",
+      "geo_name": "Томская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        29,
+        19,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-TUL",
+      "geo_name": "Тульская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        50,
+        23,
+        19,
+        7,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KAM",
+      "geo_name": "Камчатский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "values": [
+        42,
+        31,
+        22,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-BRY",
+      "geo_name": "Брянская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        25,
+        21,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-MOS",
+      "geo_name": "Московская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        27,
+        20,
+        5,
+        2
+      ]
+    },
+    {
+      "geo_code": "RU-TYU",
+      "geo_name": "Тюменская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        44,
+        22,
+        26,
+        8,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-PNZ",
+      "geo_name": "Пензенская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        49,
+        26,
+        20,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KO",
+      "geo_name": "Республика Коми",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        28,
+        20,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KRS",
+      "geo_name": "Курская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        28,
+        21,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KLU",
+      "geo_name": "Калужская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        45,
+        26,
+        20,
+        7,
+        2
+      ]
+    },
+    {
+      "geo_code": "RU-SAR",
+      "geo_name": "Саратовская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        54,
+        23,
+        19,
+        3,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-ORL",
+      "geo_name": "Орловская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        24,
+        22,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-MO",
+      "geo_name": "Республика Мордовия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        49,
+        24,
+        21,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KEM",
+      "geo_name": "Кемеровская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        50,
+        28,
+        18,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-SMO",
+      "geo_name": "Смоленская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        29,
+        19,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-NIZ",
+      "geo_name": "Нижегородская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        25,
+        23,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-TVE",
+      "geo_name": "Тверская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        27,
+        21,
+        3,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-VLA",
+      "geo_name": "Владимирская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        28,
+        20,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-MUR",
+      "geo_name": "Мурманская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        44,
+        29,
+        24,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KGN",
+      "geo_name": "Курганская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        26,
+        22,
+        6,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-RYA",
+      "geo_name": "Рязанская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        45,
+        26,
+        22,
+        6,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-CU",
+      "geo_name": "Чувашская Республика",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        22,
+        24,
+        7,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-AMU",
+      "geo_name": "Амурская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        29,
+        26,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-TAM",
+      "geo_name": "Тамбовская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        27,
+        21,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-ZAB",
+      "geo_name": "Забайкальский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        29,
+        26,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KGD",
+      "geo_name": "Калининградская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        26,
+        23,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-VLG",
+      "geo_name": "Вологодская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        25,
+        23,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-NGR",
+      "geo_name": "Новгородская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        30,
+        21,
+        2,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-LEN",
+      "geo_name": "Ленинградская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        26,
+        23,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-BEL",
+      "geo_name": "Белгородская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        43,
+        28,
+        24,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-LIP",
+      "geo_name": "Липецкая область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        25,
+        23,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KK",
+      "geo_name": "Республика Хакасия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        43,
+        27,
+        25,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KOS",
+      "geo_name": "Костромская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        26,
+        22,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-VGG",
+      "geo_name": "Волгоградская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        48,
+        24,
+        22,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-CHE",
+      "geo_name": "Челябинская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        23,
+        27,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-ALT",
+      "geo_name": "Алтайский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        30,
+        19,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-SAM",
+      "geo_name": "Самарская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        45,
+        26,
+        24,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-IVA",
+      "geo_name": "Ивановская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        26,
+        22,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-PSK",
+      "geo_name": "Псковская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "values": [
+        45,
+        28,
+        22,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-SPE",
+      "geo_name": "город Санкт-Петербург",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        44,
+        24,
+        25,
+        6,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-ARK",
+      "geo_name": "Архангельская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        41,
+        25,
+        27,
+        7,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KDA",
+      "geo_name": "Краснодарский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        31,
+        22,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-ROS",
+      "geo_name": "Ростовская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        26,
+        26,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-VOR",
+      "geo_name": "Воронежская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        47,
+        24,
+        23,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-AL",
+      "geo_name": "Республика Алтай",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "values": [
+        37,
+        34,
+        24,
+        5,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-ULY",
+      "geo_name": "Ульяновская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        24,
+        25,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-YAR",
+      "geo_name": "Ярославская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        43,
+        25,
+        25,
+        6,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KIR",
+      "geo_name": "Кировская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        46,
+        24,
+        26,
+        4,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-PER",
+      "geo_name": "Пермский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        45,
+        21,
+        28,
+        6,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-IRK",
+      "geo_name": "Иркутская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        30,
+        25,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-ME",
+      "geo_name": "Республика Марий Эл",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        24,
+        27,
+        6,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-ORE",
+      "geo_name": "Оренбургская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        43,
+        26,
+        27,
+        3,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-BU",
+      "geo_name": "Республика Бурятия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        37,
+        24,
+        34,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-BA",
+      "geo_name": "Республика Башкортостан",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        42,
+        21,
+        31,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-STA",
+      "geo_name": "Ставропольский край",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        45,
+        30,
+        21,
+        3,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KR",
+      "geo_name": "Республика Карелия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        43,
+        27,
+        27,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-TA",
+      "geo_name": "Республика Татарстан",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        39,
+        22,
+        33,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-KL",
+      "geo_name": "Республика Калмыкия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "values": [
+        37,
+        26,
+        34,
+        3,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-AST",
+      "geo_name": "Астраханская область",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        38,
+        29,
+        28,
+        4,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-UD",
+      "geo_name": "республика Удмуртия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        39,
+        23,
+        28,
+        9,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-TY",
+      "geo_name": "Республика Тува",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        false
+      ],
+      "values": [
+        34,
+        15,
+        44,
+        7,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KC",
+      "geo_name": "Карачаево-Черкесская Республика",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        37,
+        33,
+        26,
+        2,
+        2
+      ]
+    },
+    {
+      "geo_code": "RU-AD",
+      "geo_name": "Республика Адыгея",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        36,
+        31,
+        26,
+        7,
+        0
+      ]
+    },
+    {
+      "geo_code": "RU-KB",
+      "geo_name": "Кабардино-Балкарская Республика",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        38,
+        31,
+        25,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-SA",
+      "geo_name": "Республика Саха (Якутия)",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        31,
+        23,
+        38,
+        7,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-SE",
+      "geo_name": "Республика Северная Осетия-Алания",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        31,
+        36,
+        27,
+        5,
+        1
+      ]
+    },
+    {
+      "geo_code": "RU-DA",
+      "geo_name": "Республика Дагестан",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        34,
+        37,
+        23,
+        3,
+        3
+      ]
+    },
+    {
+      "geo_code": "RU-IN",
+      "geo_name": "Республика Ингушетия",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        34,
+        42,
+        17,
+        4,
+        3
+      ]
+    },
+    {
+      "geo_code": "RU-CE",
+      "geo_name": "Чеченская Республика",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "values": [
+        28,
+        42,
+        23,
+        5,
+        2
+      ]
+    }
+  ],
+  "keywords": [
+    "купить квартиру",
+    "снять квартиру",
+    "ипотека",
+    "новостройки",
+    "квартиры в москве"
+  ],
+  "normalization_scope": "ed556a15cbb2f3b0",
+  "related": {
+    "rising": [],
+    "top": []
+  },
+  "retrieved_at": "2026-09-06T20:24:00.940411Z",
+  "source": "https://trends.google.com/trends/api/explore",
+  "timeframe": "today 12-m",
+  "timeline": [
+    {
+      "formatted_time": "31 авг. – 6 сент. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-08-31T00:00:00Z",
+      "values": [
+        61,
+        51,
+        31,
+        8,
+        2
+      ]
+    },
+    {
+      "formatted_time": "7–13 сент. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-09-07T00:00:00Z",
+      "values": [
+        66,
+        41,
+        35,
+        8,
+        4
+      ]
+    },
+    {
+      "formatted_time": "14–20 сент. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-09-14T00:00:00Z",
+      "values": [
+        58,
+        35,
+        29,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "21–27 сент. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-09-21T00:00:00Z",
+      "values": [
+        58,
+        34,
+        29,
+        8,
+        2
+      ]
+    },
+    {
+      "formatted_time": "28 сент. – 4 окт. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-09-28T00:00:00Z",
+      "values": [
+        66,
+        37,
+        35,
+        12,
+        3
+      ]
+    },
+    {
+      "formatted_time": "5–11 окт. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-10-05T00:00:00Z",
+      "values": [
+        63,
+        35,
+        30,
+        9,
+        3
+      ]
+    },
+    {
+      "formatted_time": "12–18 окт. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-10-12T00:00:00Z",
+      "values": [
+        61,
+        32,
+        32,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "19–25 окт. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-10-19T00:00:00Z",
+      "values": [
+        70,
+        38,
+        37,
+        9,
+        4
+      ]
+    },
+    {
+      "formatted_time": "26 окт. – 1 нояб. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-10-26T00:00:00Z",
+      "values": [
+        100,
+        44,
+        54,
+        16,
+        5
+      ]
+    },
+    {
+      "formatted_time": "2–8 нояб. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-11-02T00:00:00Z",
+      "values": [
+        76,
+        34,
+        41,
+        12,
+        4
+      ]
+    },
+    {
+      "formatted_time": "9–15 нояб. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-11-09T00:00:00Z",
+      "values": [
+        92,
+        36,
+        45,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "16–22 нояб. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-11-16T00:00:00Z",
+      "values": [
+        97,
+        35,
+        43,
+        11,
+        5
+      ]
+    },
+    {
+      "formatted_time": "23–29 нояб. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-11-23T00:00:00Z",
+      "values": [
+        69,
+        34,
+        41,
+        9,
+        4
+      ]
+    },
+    {
+      "formatted_time": "30 нояб. – 6 дек. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-11-30T00:00:00Z",
+      "values": [
+        76,
+        37,
+        40,
+        13,
+        4
+      ]
+    },
+    {
+      "formatted_time": "7–13 дек. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-12-07T00:00:00Z",
+      "values": [
+        60,
+        31,
+        31,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "14–20 дек. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-12-14T00:00:00Z",
+      "values": [
+        71,
+        26,
+        28,
+        8,
+        2
+      ]
+    },
+    {
+      "formatted_time": "21–27 дек. 2025 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-12-21T00:00:00Z",
+      "values": [
+        62,
+        27,
+        26,
+        8,
+        2
+      ]
+    },
+    {
+      "formatted_time": "28 дек. 2025 г. – 3 янв. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2025-12-28T00:00:00Z",
+      "values": [
+        60,
+        28,
+        31,
+        10,
+        2
+      ]
+    },
+    {
+      "formatted_time": "4–10 янв. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-01-04T00:00:00Z",
+      "values": [
+        65,
+        31,
+        32,
+        7,
+        2
+      ]
+    },
+    {
+      "formatted_time": "11–17 янв. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-01-11T00:00:00Z",
+      "values": [
+        89,
+        31,
+        45,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "18–24 янв. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-01-18T00:00:00Z",
+      "values": [
+        93,
+        31,
+        38,
+        10,
+        3
+      ]
+    },
+    {
+      "formatted_time": "25–31 янв. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-01-25T00:00:00Z",
+      "values": [
+        91,
+        33,
+        42,
+        11,
+        4
+      ]
+    },
+    {
+      "formatted_time": "1–7 февр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-02-01T00:00:00Z",
+      "values": [
+        90,
+        32,
+        43,
+        12,
+        3
+      ]
+    },
+    {
+      "formatted_time": "8–14 февр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-02-08T00:00:00Z",
+      "values": [
+        71,
+        28,
+        30,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "15–21 февр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-02-15T00:00:00Z",
+      "values": [
+        96,
+        33,
+        35,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "22–28 февр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-02-22T00:00:00Z",
+      "values": [
+        78,
+        34,
+        35,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "1–7 мар. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-03-01T00:00:00Z",
+      "values": [
+        80,
+        32,
+        31,
+        11,
+        4
+      ]
+    },
+    {
+      "formatted_time": "8–14 мар. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-03-08T00:00:00Z",
+      "values": [
+        82,
+        32,
+        30,
+        9,
+        4
+      ]
+    },
+    {
+      "formatted_time": "15–21 мар. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-03-15T00:00:00Z",
+      "values": [
+        83,
+        33,
+        31,
+        9,
+        3
+      ]
+    },
+    {
+      "formatted_time": "22–28 мар. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-03-22T00:00:00Z",
+      "values": [
+        92,
+        34,
+        31,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "29 мар. – 4 апр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-03-29T00:00:00Z",
+      "values": [
+        98,
+        36,
+        35,
+        14,
+        4
+      ]
+    },
+    {
+      "formatted_time": "5–11 апр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-04-05T00:00:00Z",
+      "values": [
+        80,
+        30,
+        31,
+        7,
+        3
+      ]
+    },
+    {
+      "formatted_time": "12–18 апр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-04-12T00:00:00Z",
+      "values": [
+        75,
+        33,
+        36,
+        8,
+        4
+      ]
+    },
+    {
+      "formatted_time": "19–25 апр. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-04-19T00:00:00Z",
+      "values": [
+        79,
+        32,
+        30,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "26 апр. – 2 мая 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-04-26T00:00:00Z",
+      "values": [
+        78,
+        37,
+        36,
+        14,
+        4
+      ]
+    },
+    {
+      "formatted_time": "3–9 мая 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-05-03T00:00:00Z",
+      "values": [
+        62,
+        33,
+        29,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "10–16 мая 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-05-10T00:00:00Z",
+      "values": [
+        64,
+        32,
+        29,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "17–23 мая 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-05-17T00:00:00Z",
+      "values": [
+        71,
+        36,
+        31,
+        9,
+        3
+      ]
+    },
+    {
+      "formatted_time": "24–30 мая 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-05-24T00:00:00Z",
+      "values": [
+        74,
+        41,
+        28,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "31 мая – 6 июн. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-05-31T00:00:00Z",
+      "values": [
+        78,
+        45,
+        33,
+        13,
+        4
+      ]
+    },
+    {
+      "formatted_time": "7–13 июн. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-06-07T00:00:00Z",
+      "values": [
+        73,
+        44,
+        33,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "14–20 июн. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-06-14T00:00:00Z",
+      "values": [
+        64,
+        40,
+        43,
+        9,
+        4
+      ]
+    },
+    {
+      "formatted_time": "21–27 июн. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-06-21T00:00:00Z",
+      "values": [
+        68,
+        45,
+        49,
+        7,
+        3
+      ]
+    },
+    {
+      "formatted_time": "28 июн. – 4 июл. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-06-28T00:00:00Z",
+      "values": [
+        72,
+        46,
+        37,
+        9,
+        4
+      ]
+    },
+    {
+      "formatted_time": "5–11 июл. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-07-05T00:00:00Z",
+      "values": [
+        72,
+        52,
+        29,
+        8,
+        4
+      ]
+    },
+    {
+      "formatted_time": "12–18 июл. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-07-12T00:00:00Z",
+      "values": [
+        66,
+        46,
+        31,
+        8,
+        4
+      ]
+    },
+    {
+      "formatted_time": "19–25 июл. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-07-19T00:00:00Z",
+      "values": [
+        77,
+        42,
+        32,
+        10,
+        5
+      ]
+    },
+    {
+      "formatted_time": "26 июл. – 1 авг. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-07-26T00:00:00Z",
+      "values": [
+        75,
+        44,
+        27,
+        10,
+        4
+      ]
+    },
+    {
+      "formatted_time": "2–8 авг. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-08-02T00:00:00Z",
+      "values": [
+        75,
+        46,
+        26,
+        10,
+        5
+      ]
+    },
+    {
+      "formatted_time": "9–15 авг. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-08-09T00:00:00Z",
+      "values": [
+        71,
+        47,
+        31,
+        9,
+        5
+      ]
+    },
+    {
+      "formatted_time": "16–22 авг. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-08-16T00:00:00Z",
+      "values": [
+        66,
+        44,
+        32,
+        9,
+        4
+      ]
+    },
+    {
+      "formatted_time": "23–29 авг. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-08-23T00:00:00Z",
+      "values": [
+        66,
+        41,
+        33,
+        8,
+        3
+      ]
+    },
+    {
+      "formatted_time": "30 авг. – 5 сент. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": false,
+      "timestamp": "2026-08-30T00:00:00Z",
+      "values": [
+        60,
+        37,
+        28,
+        10,
+        3
+      ]
+    },
+    {
+      "formatted_time": "6–12 сент. 2026 г.",
+      "has_data": [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      "is_partial": true,
+      "timestamp": "2026-09-06T00:00:00Z",
+      "values": [
+        65,
+        35,
+        31,
+        7,
+        3
+      ]
+    }
+  ]
+}

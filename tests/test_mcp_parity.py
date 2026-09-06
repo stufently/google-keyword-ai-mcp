@@ -761,3 +761,139 @@ def test_research_over_mcp_can_save_a_run_and_bound_its_cost(
     assert isinstance(budget, Budget)
     assert budget.max_ads_calls == 2
     assert budget.max_runtime_seconds == 60.0
+
+
+@pytest.mark.parametrize("refused", [False, True])
+def test_rank_keyword_demand_matches_cli_wire_envelope(
+    monkeypatch: pytest.MonkeyPatch, refused: bool
+) -> None:
+    from google_keyword_ai.demand import DemandRow
+    from google_keyword_ai.envelope import Completeness
+    from google_keyword_ai.usecases.demand import DemandData
+
+    settings = Settings()
+    expected: Envelope[DemandData | None] = (
+        Envelope(
+            data=None,
+            errors=["Demand requires between 2 and 50 unique nonempty keywords."],
+            completeness=Completeness.EMPTY,
+            completeness_reason="Demand requires between 2 and 50 unique nonempty keywords.",
+        )
+        if refused
+        else Envelope(
+            data=DemandData(
+                provider=ProviderInfo(name="trends", official=False, stability="unofficial"),
+                anchor="one",
+                language="ru",
+                country="RU",
+                timeframe="today 3-m",
+                rows=[
+                    DemandRow(
+                        keyword="one",
+                        relative_demand=100.0,
+                        is_anchor=True,
+                        batch=1,
+                        measured_weeks=53,
+                        weeks=53,
+                        reason=None,
+                    ),
+                    DemandRow(
+                        keyword="two",
+                        relative_demand=None,
+                        is_anchor=False,
+                        batch=1,
+                        measured_weeks=0,
+                        weeks=53,
+                        reason="below anchor resolution",
+                    ),
+                ],
+                batches_requested=1,
+                batches_failed=0,
+                caveats=["relative", "resolution", "stitching"],
+                notices=["RELATED_QUERIES came back once per keyword"],
+            ),
+            warnings=["timeline coverage is sparse"],
+            completeness=Completeness.PARTIAL,
+            completeness_reason="below anchor resolution",
+        )
+    )
+    keywords = ["one"] if refused else ["one", "two"]
+
+    def fake_run(
+        _settings: Settings, supplied: list[str], **kwargs: object
+    ) -> Envelope[DemandData | None]:
+        assert supplied == keywords
+        assert kwargs == {
+            "anchor": "one",
+            "language": "ru",
+            "country": "RU",
+            "timeframe": "today 3-m",
+        }
+        return expected
+
+    monkeypatch.setattr(mcp_server, "run_demand", fake_run)
+    monkeypatch.setattr(cli_main, "run_demand", fake_run)
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    server = build_server(settings)
+    tool = server._tool_manager.get_tool("rank_keyword_demand")
+    assert tool is not None and tool.is_async is False
+
+    async def call_demand() -> dict[str, object]:
+        with anyio.fail_after(10):
+            async with (
+                create_client_server_memory_streams() as (
+                    (client_read, client_write),
+                    (server_read, server_write),
+                ),
+                anyio.create_task_group() as task_group,
+            ):
+                low_level_server = server._lowlevel_server
+
+                async def run_server() -> None:
+                    await low_level_server.run(
+                        server_read,
+                        server_write,
+                        low_level_server.create_initialization_options(),
+                        raise_exceptions=True,
+                    )
+
+                task_group.start_soon(run_server)
+                async with ClientSession(client_read, client_write) as client:
+                    await client.initialize()
+                    result = await client.call_tool(
+                        "rank_keyword_demand",
+                        {
+                            "keywords": keywords,
+                            "anchor": "one",
+                            "language": "ru",
+                            "country": "RU",
+                            "timeframe": "today 3-m",
+                        },
+                    )
+                task_group.cancel_scope.cancel()
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    mcp_payload = anyio.run(call_demand)
+    cli_result = CliRunner().invoke(
+        cli_main.app,
+        [
+            "demand",
+            *keywords,
+            "--anchor",
+            "one",
+            "--language",
+            "ru",
+            "--country",
+            "RU",
+            "--timeframe",
+            "today 3-m",
+        ],
+    )
+    assert cli_result.exit_code == 1
+    assert mcp_payload == json.loads(cli_result.stdout) == expected.to_wire()
+    if not refused:
+        assert cli_result.output.index("timeline coverage is sparse") < cli_result.output.rindex(
+            "Notice:"
+        )

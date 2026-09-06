@@ -30,6 +30,7 @@ from google_keyword_ai.usecases.analysis import (
     run_score,
 )
 from google_keyword_ai.usecases.cache import run_cache_purge, run_cache_status
+from google_keyword_ai.usecases.demand import DemandData, run_demand
 from google_keyword_ai.usecases.doctor import run_config_show, run_doctor
 from google_keyword_ai.usecases.expand import run_expand
 from google_keyword_ai.usecases.gsc import (
@@ -191,6 +192,40 @@ def expand(
         ),
         output_format,
     )
+
+
+@app.command()
+def demand(
+    keywords: Annotated[list[str] | None, typer.Argument()] = None,
+    anchor: Annotated[str | None, typer.Option("--anchor")] = None,
+    language: Annotated[str | None, typer.Option("--language")] = None,
+    country: Annotated[str | None, typer.Option("--country")] = None,
+    timeframe: Annotated[str, typer.Option("--timeframe")] = "today 12-m",
+    output_format: Annotated[OutputFormat, typer.Option("--format")] = OutputFormat.JSON,
+) -> None:
+    """Rank 2-50 keywords on a common relative demand scale (anchor = 100)."""
+    settings = load_settings()
+    configure_logging(settings.log_level)
+    notices: list[str] = []
+
+    def build() -> Envelope[DemandData | None]:
+        envelope = run_demand(
+            settings,
+            keywords or [],
+            anchor=anchor,
+            language=language,
+            country=country,
+            timeframe=timeframe,
+        )
+        if envelope.data is not None:
+            notices.extend(envelope.data.notices)
+        return envelope
+
+    try:
+        _finish(build, output_format)
+    finally:
+        for notice in notices:
+            typer.echo(f"Notice: {notice}", err=True)
 
 
 @app.command()

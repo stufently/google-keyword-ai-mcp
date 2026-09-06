@@ -70,6 +70,27 @@ gkai trends compare "running shoes" "trail shoes" --country US --timeframe "toda
 under explicit limits. `gkai trends` compares relative interest in one normalization
 scope.
 
+## Comparable relative demand
+
+```bash
+gkai demand "running shoes" "trail shoes" "road shoes" --anchor "running shoes" --language en --country US --timeframe "today 12-m" --format json
+```
+
+`gkai demand` accepts 2–50 unique nonempty keywords, deduplicated after Unicode,
+case and whitespace normalization. `--anchor` defaults to the first input key;
+an explicit anchor must belong to the set. Each batch compares up to four keys
+with that anchor, then scales their measured whole-week means to anchor = 100.
+`--format` supports `json` and `table`. These are relative values, not absolute
+search volumes. A broad anchor can push weaker keywords below the scale's
+resolution: `null` means unmeasured or failed, not zero demand. Read each row's
+coverage and `reason`, and the three `data.caveats`.
+
+Messages about unused Trends widgets are `data.notices` and are also printed on
+stderr after the envelope; they do not make a healthy demand answer partial.
+Any missing numeric row or failed batch makes it `partial`; all failed batches
+or no numeric rows make it `empty`. Refused input returns `data: null`. Both
+incomplete states exit 1 with valid JSON on stdout.
+
 ## Research workflows
 
 ```bash

@@ -28,6 +28,7 @@ from google_keyword_ai.usecases.analysis import (
     run_niche_analyze,
     run_score,
 )
+from google_keyword_ai.usecases.demand import DemandData, run_demand
 from google_keyword_ai.usecases.doctor import DoctorData, run_doctor
 from google_keyword_ai.usecases.expand import ExpandData, run_expand
 from google_keyword_ai.usecases.gsc import OpportunitiesData, run_gsc_opportunities
@@ -147,6 +148,25 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             run_trends_compare(
                 active_settings,
                 keywords,
+                language=language,
+                country=country,
+                timeframe=timeframe,
+            )
+        )
+
+    @tool()
+    def rank_keyword_demand(
+        keywords: list[str],
+        anchor: str | None = None,
+        language: str | None = None,
+        country: str | None = None,
+        timeframe: str = "today 12-m",
+    ) -> Envelope[DemandData | None]:
+        return _widen(
+            run_demand(
+                active_settings,
+                keywords,
+                anchor=anchor,
                 language=language,
                 country=country,
                 timeframe=timeframe,

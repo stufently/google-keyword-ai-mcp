@@ -244,7 +244,7 @@ def test_the_error_guard_leaves_the_published_schemas_alone(
     """
     tools = list_tools(tmp_path)
 
-    assert len(tools) == 14
+    assert len(tools) == 15
     suggest = tools["suggest_keywords"]
     assert sorted(suggest.input_schema["properties"]) == ["country", "language", "limit", "query"]
     assert suggest.input_schema["required"] == ["query"]
@@ -256,6 +256,19 @@ def test_the_error_guard_leaves_the_published_schemas_alone(
     assert output["properties"]["data"]["anyOf"][-1] == {"type": "null"}, (
         "the published schema has to admit the empty answer the tool can return"
     )
+
+    demand = tools["rank_keyword_demand"]
+    assert sorted(demand.input_schema["properties"]) == [
+        "anchor",
+        "country",
+        "keywords",
+        "language",
+        "timeframe",
+    ]
+    assert demand.input_schema["required"] == ["keywords"]
+    demand_output = demand.output_schema
+    assert demand_output is not None
+    assert demand_output["properties"]["data"]["anyOf"][-1] == {"type": "null"}
 
 
 @pytest.mark.parametrize(

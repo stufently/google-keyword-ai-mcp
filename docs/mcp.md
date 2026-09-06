@@ -10,12 +10,13 @@ Installing the wheel puts the same console script, `google-keyword-ai`, on `PATH
 
 ## Tools
 
-The server exposes exactly 14 tools:
+The server exposes exactly 15 tools:
 
 - `doctor`
 - `suggest_keywords`
 - `expand_keywords`
 - `analyze_trends`
+- `rank_keyword_demand`
 - `get_keyword_metrics`
 - `analyze_competitor`
 - `find_gsc_opportunities`
@@ -32,6 +33,15 @@ Verify the registered list without starting a transport:
 ```bash
 uv run --all-extras python -c "from google_keyword_ai.config import Settings; from google_keyword_ai.mcp.server import build_server; print(sorted(t.name for t in build_server(Settings())._tool_manager.list_tools()))"
 ```
+
+`rank_keyword_demand(keywords, anchor=None, language=None, country=None,
+timeframe="today 12-m")` compares 2–50 unique keywords through a shared Trends
+anchor (the first keyword by default). Its synchronous implementation returns
+`Envelope[DemandData | None]`, matching `gkai demand`. Values are percentages of
+the anchor, not search volumes; unmeasured keywords and failed batches carry
+`null` plus a reason. Unused-widget messages travel in `data.notices`, outside
+the envelope's `warnings`, and do not downgrade completeness. See
+[the method and limitations](demand.md).
 
 ## Claude Code
 
@@ -76,4 +86,3 @@ not report its own refusal: the answer would reach the caller as an opaque
 `Error executing tool <name>` with the reason stripped out. Protocol errors are
 left to the protocol — an unknown tool name, arguments that fail the input
 schema — and never carry a result this project produced.
-

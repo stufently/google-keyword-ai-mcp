@@ -23,11 +23,12 @@ src/google_keyword_ai/
   targets.py                                             # разбор цели-конкурента
   http.py ratelimit.py cache.py normalize.py             # инфраструктура
   expansion.py scoring.py clustering.py opportunities.py # алгоритмы
+  demand.py                                              # чистый якорный пересчёт Trends
   storage/     engine.py migrations.py                   # SQLite, user_version
   providers/   autocomplete.py expander.py google_ads.py search_console.py
                trends/{models,unofficial,official,provider}.py
   pipeline/    budget.py models.py scenarios.py runs.py executor.py
-  usecases/    doctor suggest expand trends ads gsc research runs cache analysis limits
+  usecases/    doctor suggest expand trends demand ads gsc research runs cache analysis limits
   reports/     markdown.py
   cli/main.py  mcp/server.py  data/{alphabets,modifiers}
 ```
@@ -55,7 +56,7 @@ src/google_keyword_ai/
 - **Отказ выполнить запрос едет тем же конвертом.** Негодный аргумент или
   конфигурация: CLI печатает конверт `empty` и выходит с кодом 1 (код 1 всегда
   печатает валидный JSON), MCP отдаёт тот же конверт, а не протокольную ошибку.
-  Поэтому все 14 инструментов объявлены как `Envelope[X | None]`: SDK
+  Поэтому все 15 инструментов объявлены как `Envelope[X | None]`: SDK
   валидирует выход по типу, и инструмент, не умеющий сказать `data: null`, не
   смог бы доложить собственный отказ.
 - **Три сценария вместо одной цепочки:** ниша, конкурент, существующий сайт.
@@ -83,6 +84,6 @@ src/google_keyword_ai/
 
 `docs/architecture.md` — как всё устроено, `docs/mcp.md` — инструменты,
 `docs/privacy.md` — что и где хранится, `docs/{autocomplete,expansion,trends,
-google-ads,search-console,pipeline,runs,scoring}.md` — по подсистемам,
+google-ads,search-console,pipeline,runs,scoring,demand}.md` — по подсистемам,
 `docs/specs/` — спеки вех, `docs/superpowers/specs/` — общий дизайн.
 Изменения — в `CHANGELOG.md`.
