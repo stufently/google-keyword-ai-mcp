@@ -125,6 +125,10 @@ def test_measured_zero_is_a_number() -> None:
     assert row.reason is None
 
 
+def test_two_keywords_fit_one_batch() -> None:
+    assert plan_batches(["a", "b"], "a") == [["a", "b"]]
+
+
 def test_fifty_keywords_fit_thirteen_batches() -> None:
     batches = plan_batches([f"key{i}" for i in range(50)], "key0")
     assert len(batches) == 13
@@ -182,6 +186,48 @@ def test_failed_batch_reason_is_verbatim_and_later_anchor_can_recover() -> None:
     ]
     assert rows[-1].reason == reason
     assert (rows[-1].measured_weeks, rows[-1].weeks) == (0, 0)
+
+
+def test_anchor_keeps_first_usable_batch_coverage() -> None:
+    first = series(
+        ["anchor", "first"], [[40, 20], [60, 30], [100, 90]], partial=[False, False, True]
+    )
+    second = series(["anchor", "second"], [[20, 10]])
+    rows = combine(
+        [
+            DemandBatch(keywords=first.keywords, result=first),
+            DemandBatch(keywords=second.keywords, result=second),
+        ]
+    )
+    anchors = [row for row in rows if row.is_anchor]
+    assert len(anchors) == 1
+    anchor = anchors[0]
+    assert (anchor.batch, anchor.weeks, anchor.measured_weeks) == (1, 2, 2)
+    assert anchor.relative_demand == 100.0
+    assert anchor.reason is None
+    assert [(row.keyword, row.relative_demand, row.weeks) for row in rows[1:]] == [
+        ("first", 50.0, 2),
+        ("second", 50.0, 1),
+    ]
+
+
+def test_later_failed_batch_preserves_first_usable_anchor() -> None:
+    reason = "Google refused this request: 429"
+    first = series(["anchor", "ok"], [[40, 20], [60, 30]])
+    rows = combine(
+        [
+            DemandBatch(keywords=first.keywords, result=first),
+            DemandBatch(keywords=["anchor", "lost"], reason=reason),
+        ]
+    )
+    assert [(row.keyword, row.relative_demand, row.batch) for row in rows] == [
+        ("anchor", 100.0, 1),
+        ("ok", 50.0, 1),
+        ("lost", None, 2),
+    ]
+    assert (rows[0].weeks, rows[0].measured_weeks, rows[0].reason) == (2, 2, None)
+    assert rows[-1].reason == reason
+    assert (rows[-1].weeks, rows[-1].measured_weeks) == (0, 0)
 
 
 def test_absent_keyword_or_missing_flags_has_no_measured_mean() -> None:

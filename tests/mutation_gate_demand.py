@@ -1,4 +1,4 @@
-"""Seven reversible demand mutations. Run sequentially, never alongside edits/tests.
+"""Ten reversible demand mutations. Run sequentially, never alongside edits/tests.
 
 Each mutant must fail its own test at its designated assertion. Every target
 first passes on the original source, including when running with --only.
@@ -19,6 +19,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src/google_keyword_ai/demand.py"
 TEST_FILE = "tests/test_demand.py"
+USECASE_SOURCE = ROOT / "src/google_keyword_ai/usecases/demand.py"
+USECASE_TEST_FILE = "tests/test_demand_usecase.py"
 
 
 @dataclass(frozen=True)
@@ -28,10 +30,12 @@ class Mutation:
     replacement: str
     test: str
     assertion: str
+    source: Path = SOURCE
+    test_file: str = TEST_FILE
 
     @property
     def nodeid(self) -> str:
-        return f"{TEST_FILE}::{self.test}"
+        return f"{self.test_file}::{self.test}"
 
 
 MUTATIONS = (
@@ -84,11 +88,36 @@ MUTATIONS = (
         "test_nulls_sort_last_in_input_order_even_beside_measured_zero",
         'assert [row.keyword for row in rows] == ["anchor", "zero", "unknown1", "unknown2"]',
     ),
+    Mutation(
+        "M8",
+        "elif anchor_row.relative_demand is None and row.relative_demand is not None:",
+        "elif True:",
+        "test_anchor_keeps_first_usable_batch_coverage",
+        "assert (anchor.batch, anchor.weeks, anchor.measured_weeks) == (1, 2, 2)",
+    ),
+    Mutation(
+        "M9",
+        'RELATIVE_CAVEAT = "Values are relative to the anchor, not absolute search volumes."',
+        'RELATIVE_CAVEAT = "Values are absolute search volumes."',
+        "test_caveat_constants_keep_their_exact_meaning",
+        "assert caveats == expected",
+        source=USECASE_SOURCE,
+        test_file=USECASE_TEST_FILE,
+    ),
+    Mutation(
+        "M10",
+        'timeframe: str = "today 12-m",',
+        'timeframe: str = "today 5-y",',
+        "test_usecase_default_timeframe_reaches_data_and_http",
+        'assert result.data.timeframe == "today 12-m"',
+        source=USECASE_SOURCE,
+        test_file=USECASE_TEST_FILE,
+    ),
 )
 
 
 def checked_original(mutation: Mutation) -> bytes:
-    original = SOURCE.read_bytes()
+    original = mutation.source.read_bytes()
     count = original.decode("utf-8").count(mutation.anchor)
     if count != 1:
         raise ValueError(f"{mutation.id}: replacement anchor occurs {count} times, expected 1")
@@ -140,7 +169,7 @@ def failure_location(result: subprocess.CompletedProcess[str], mutation: Mutatio
         raise ValueError(f"{mutation.id}: expected one failure location, got {locations}")
     filename, number = locations[0]
     path = (ROOT / filename).resolve()
-    if path != ROOT / TEST_FILE:
+    if path != ROOT / mutation.test_file:
         raise ValueError(f"{mutation.id}: failed outside the target test: {filename}:{number}")
     lines = path.read_text(encoding="utf-8").splitlines()
     line_number = int(number)
@@ -151,7 +180,7 @@ def failure_location(result: subprocess.CompletedProcess[str], mutation: Mutatio
         raise ValueError(
             f"{mutation.id}: wrong assertion: {line!r}, expected {mutation.assertion!r}"
         )
-    return f"{TEST_FILE}:{number} -> {line}"
+    return f"{mutation.test_file}:{number} -> {line}"
 
 
 def run_mutation(mutation: Mutation) -> None:
@@ -159,10 +188,10 @@ def run_mutation(mutation: Mutation) -> None:
     before = hashlib.sha256(original).hexdigest()
     require_green(mutation)
     # The baseline test must not have changed the source being tested.
-    if SOURCE.read_bytes() != original:
+    if mutation.source.read_bytes() != original:
         raise ValueError(f"{mutation.id}: source changed during baseline; file not mutated")
     try:
-        SOURCE.write_bytes(
+        mutation.source.write_bytes(
             original.decode("utf-8")
             .replace(mutation.anchor, mutation.replacement, 1)
             .encode("utf-8")
@@ -174,8 +203,8 @@ def run_mutation(mutation: Mutation) -> None:
             print(result.stdout, flush=True)
             raise
     finally:
-        SOURCE.write_bytes(original)
-        restored = SOURCE.read_bytes()
+        mutation.source.write_bytes(original)
+        restored = mutation.source.read_bytes()
         after = hashlib.sha256(restored).hexdigest()
         if restored != original or after != before:
             raise ValueError(f"RESTORATION FAILED: sha256 before={before}, after={after}")

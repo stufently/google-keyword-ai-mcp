@@ -1,16 +1,26 @@
 import json
 from pathlib import Path
+from typing import cast
 
+import anyio
 import httpx
 import pytest
 import respx
+from mcp.client.session import ClientSession
+from mcp.shared.memory import create_client_server_memory_streams
 from typer.testing import CliRunner
 
 from google_keyword_ai.cli import main as cli_main
 from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness
+from google_keyword_ai.mcp.server import build_server
 from google_keyword_ai.providers.trends.unofficial import EXPLORE_URL, WARMUP_URL, WIDGETDATA_URL
-from google_keyword_ai.usecases.demand import run_demand
+from google_keyword_ai.usecases.demand import (
+    RELATIVE_CAVEAT,
+    RESOLUTION_CAVEAT,
+    STITCHING_CAVEAT,
+    run_demand,
+)
 
 
 def settings_for(tmp_path: Path) -> Settings:
@@ -103,8 +113,85 @@ def test_complete_uses_default_anchor_market_and_cached_batches(tmp_path: Path) 
     ]
     assert calls == [["anchor", "a", "b", "c", "d"], ["anchor", "e"]]
     assert result.to_wire() == cached.to_wire()
-    assert len(result.data.caveats) == 3
+    assert result.data.caveats == [RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT]
     assert result.warnings == result.errors == []
+
+
+def test_caveat_constants_keep_their_exact_meaning() -> None:
+    expected = [
+        "Values are relative to the anchor, not absolute search volumes.",
+        "The scale is tied to the anchor; much weaker keywords hit the anchor's resolution limit.",
+        "Batches are stitched through the anchor; stitching error accumulates from batch to batch.",
+    ]
+    caveats = [RELATIVE_CAVEAT, RESOLUTION_CAVEAT, STITCHING_CAVEAT]
+    assert caveats == expected
+
+
+def test_usecase_default_timeframe_reaches_data_and_http(tmp_path: Path) -> None:
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router)
+        result = run_demand(settings_for(tmp_path), ["anchor", "other"])
+        request = router.get(EXPLORE_URL).calls[0].request
+    assert result.data is not None
+    assert result.data.timeframe == "today 12-m"
+    assert json.loads(request.url.params["req"])["comparisonItem"][0]["time"] == "today 12-m"
+
+
+def test_cli_default_timeframe_reaches_data_and_http(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings_for(tmp_path))
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router)
+        result = CliRunner().invoke(cli_main.app, ["demand", "anchor", "other"])
+        request = router.get(EXPLORE_URL).calls[0].request
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["data"]["timeframe"] == "today 12-m"
+    assert json.loads(request.url.params["req"])["comparisonItem"][0]["time"] == "today 12-m"
+
+
+def test_mcp_default_timeframe_reaches_data_and_http(tmp_path: Path) -> None:
+    server = build_server(settings_for(tmp_path))
+
+    async def call_demand() -> dict[str, object]:
+        with anyio.fail_after(10):
+            async with (
+                create_client_server_memory_streams() as (
+                    (client_read, client_write),
+                    (server_read, server_write),
+                ),
+                anyio.create_task_group() as task_group,
+            ):
+                low_level_server = server._lowlevel_server
+
+                async def run_server() -> None:
+                    await low_level_server.run(
+                        server_read,
+                        server_write,
+                        low_level_server.create_initialization_options(),
+                        raise_exceptions=True,
+                    )
+
+                task_group.start_soon(run_server)
+                async with ClientSession(client_read, client_write) as client:
+                    await client.initialize()
+                    result = await client.call_tool(
+                        "rank_keyword_demand", {"keywords": ["anchor", "other"]}
+                    )
+                task_group.cancel_scope.cancel()
+        assert result.is_error is not True
+        assert result.structured_content is not None
+        return cast(dict[str, object], result.structured_content)
+
+    with respx.mock(assert_all_called=True) as router:
+        mock_trends(router)
+        result = anyio.run(call_demand)
+        request = router.get(EXPLORE_URL).calls[0].request
+    assert result["completeness"] == "complete"
+    data = result["data"]
+    assert isinstance(data, dict)
+    assert data["timeframe"] == "today 12-m"
+    assert json.loads(request.url.params["req"])["comparisonItem"][0]["time"] == "today 12-m"
 
 
 @pytest.mark.parametrize("failure", [429, 500, "network", "api"])
