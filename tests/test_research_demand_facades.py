@@ -107,6 +107,36 @@ def test_cli_dry_run_demand_is_opt_in(settings: Settings, monkeypatch: pytest.Mo
     assert demand_step in ranked_plan["steps"]
 
 
+def test_dry_run_demand_step_follows_resolved_scenario(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    niche_step = "Rank candidate demand after sorting, excluding the seed"
+    other_step = "Rank candidate demand after sorting"
+    cases = (
+        ("seed", "auto", "niche", niche_step),
+        ("example.com", "auto", "competitor", other_step),
+        ("seed", "niche", "niche", niche_step),
+        ("example.com", "competitor", "competitor", other_step),
+        ("https://example.com/", "site", "site", other_step),
+    )
+    for target, scenario, resolved, expected_step in cases:
+        envelope = run_research(settings, target, scenario=scenario, demand=True, dry_run=True)
+        assert isinstance(envelope.data, DryRunPlan)
+        assert envelope.data.scenario == resolved
+        demand_steps = [
+            step for step in envelope.data.steps if step.startswith("Rank candidate demand")
+        ]
+        assert demand_steps == [expected_step]
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    result = CliRunner().invoke(cli_main.app, ["research", "example.com", "--demand", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    plan = json.loads(result.stdout)["data"]
+    assert plan["scenario"] == "competitor"
+    assert other_step in plan["steps"]
+    assert niche_step not in plan["steps"]
+
+
 @pytest.mark.parametrize("name", ["research_keywords", "plan_research"])
 def test_mcp_omitted_demand_reaches_usecase_disabled(
     settings: Settings, monkeypatch: pytest.MonkeyPatch, name: str

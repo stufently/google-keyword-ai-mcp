@@ -1,4 +1,4 @@
-"""Thirty-six reversible demand mutations (M18-M21).
+"""Forty reversible demand mutations (M18-M21).
 
 Run sequentially, never alongside edits/tests.
 
@@ -338,6 +338,57 @@ MUTATIONS = (
         "        context, keywords, demand_seed, used\n",
         "test_competitor_and_site_top_keys_are_ranked",
         "assert competitor_top.demand_status is not None",
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "X12",
+        "        if start == 0 and demand_batch.result is not None"
+        " and context.demand_anchor is None:\n",
+        "        if demand_batch.result is not None and context.demand_anchor is None:\n",
+        "test_later_batch_cannot_steal_the_first_batch_anchor",
+        'assert stats.anchor == "mid"',
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "X14",
+        '        context, keywords, demand_seed if scenario == "niche" else None, used\n',
+        "        context, keywords, None, used\n",
+        "test_competitor_and_site_top_keys_are_ranked",
+        "assert niche_seed.demand_status is None",
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "X19",
+        "    for keyword in keywords:\n"
+        "        mean = measured_mean(result, keyword)\n"
+        "        if mean is None or mean == 0:\n"
+        "            continue\n",
+        "    for keyword in keywords:\n"
+        "        values = [\n"
+        "            point.values[result.keywords.index(keyword)]\n"
+        "            for point in result.timeline\n"
+        "            if keyword in result.keywords\n"
+        "            and result.keywords.index(keyword) < len(point.values)\n"
+        "            and result.keywords.index(keyword) < len(point.has_data)\n"
+        "            and point.has_data[result.keywords.index(keyword)]\n"
+        "        ]\n"
+        "        mean = fmean(values) if values else None\n"
+        "        if mean is None or mean == 0:\n"
+        "            continue\n",
+        "test_select_anchor_by_mean_ignores_incomplete_weeks",
+        'assert select_anchor_by_mean(result, ["complete", "inflated"]) == "complete"',
+    ),
+    Mutation(
+        "X20",
+        "        if start == 0 and demand_batch.result is not None"
+        " and context.demand_anchor is None:\n",
+        "        if (start != 0 or context.demand_anchor is None)"
+        " and demand_batch.result is not None:\n",
+        "test_explicit_anchor_leads_every_batch_despite_a_stronger_mean",
+        'assert stats.anchor == "explicit"',
         source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
         test_file="tests/test_research_demand.py",
     ),

@@ -449,7 +449,10 @@ def run_research(
         selected = _dry_scenario(scenario, target, seed_keyword)
         plan = selected.plan(context)
         if demand:
-            plan.steps.append("Rank candidate demand after sorting, excluding the seed")
+            if plan.scenario == "niche":
+                plan.steps.append("Rank candidate demand after sorting, excluding the seed")
+            else:
+                plan.steps.append("Rank candidate demand after sorting")
             plan.estimated_trends_calls = active_budget.max_trends_calls
         return Envelope(data=plan)
 

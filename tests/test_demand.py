@@ -537,12 +537,26 @@ def test_select_anchor_by_mean_returns_none_when_every_key_is_unusable() -> None
     assert select_anchor_by_mean(result, []) is None
 
 
+def test_select_anchor_by_mean_ignores_incomplete_weeks() -> None:
+    result = series(
+        ["complete", "inflated"],
+        [[50, 40], [50, 40], [1, 100]],
+        partial=[False, False, True],
+    )
+    assert measured_mean(result, "complete") == 50.0
+    assert measured_mean(result, "inflated") == 40.0
+    assert select_anchor_by_mean(result, ["complete", "inflated"]) == "complete"
+
+
 def test_thousandfold_spread_keeps_a_measured_fraction() -> None:
-    result = series(["tiny", "giant"], [[1, 1000]])
+    result = series(
+        ["tiny", "giant"],
+        [[1 if week == 0 else 0, 100] for week in range(10)],
+    )
     tiny_mean = measured_mean(result, "tiny")
     giant_mean = measured_mean(result, "giant")
-    assert tiny_mean == 1.0
-    assert giant_mean == 1000.0
+    assert tiny_mean == 0.1
+    assert giant_mean == 100.0
     assert giant_mean / tiny_mean == 1000
     assert select_anchor_by_mean(result, ["tiny", "giant"]) == "giant"
     rows = combine([DemandBatch(keywords=["giant", "tiny"], result=result)])

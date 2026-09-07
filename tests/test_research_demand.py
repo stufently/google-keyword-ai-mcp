@@ -568,6 +568,92 @@ def test_reanchored_key_is_in_every_batch_without_extra_calls(settings: Settings
     anyio.run(exercise)
 
 
+def test_later_batch_cannot_steal_the_first_batch_anchor(settings: Settings) -> None:
+    async def exercise() -> None:
+        names = ["weak", "mid", "p1", "p2", "p3", "strong", "p4", "p5", "p6"]
+        profiles = {
+            "weak": _constant_profile(10, 8, weeks=8),
+            "mid": _constant_profile(50, 8, weeks=8),
+            "strong": _constant_profile(80, 8, weeks=8),
+            **{f"p{index}": _constant_profile(5, 8, weeks=8) for index in range(1, 7)},
+        }
+        trends = MappedDemandTrends(profiles)
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=2)),
+            trends=trends,
+            demand=True,
+        )
+        keywords = [
+            ResearchKeyword(keyword=name, normalized=name, discovered_from=["autocomplete"])
+            for name in names
+        ]
+        stats = await _enrich_demand(context, keywords, None, set())
+        by_name = {row.normalized: row for row in keywords}
+        assert trends.calls == [
+            ["weak", "mid", "p1", "p2", "p3"],
+            ["mid", "strong", "p4", "p5", "p6"],
+        ]
+        assert stats is not None
+        assert stats.anchor == "mid"
+        assert by_name["strong"].demand_relative == 160.0
+        assert by_name["strong"].demand_relative > 100
+
+    anyio.run(exercise)
+
+
+def test_explicit_anchor_leads_every_batch_despite_a_stronger_mean(settings: Settings) -> None:
+    async def exercise() -> None:
+        names = ["explicit", *[f"k{index:02}" for index in range(12)]]
+        profiles = {
+            "explicit": _constant_profile(5, 8, weeks=8),
+            **{
+                f"k{index:02}": _constant_profile(80 if index % 4 == 0 else 10, 8, weeks=8)
+                for index in range(12)
+            },
+        }
+        trends = MappedDemandTrends(profiles)
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+            trends=trends,
+            demand=True,
+            demand_anchor="explicit",
+        )
+        keywords = [
+            ResearchKeyword(keyword=name, normalized=name, discovered_from=["autocomplete"])
+            for name in names
+        ]
+        stats = await _enrich_demand(context, keywords, None, set())
+        assert stats is not None
+        assert stats.anchor == "explicit"
+        assert trends.calls == [
+            ["explicit", "k00", "k01", "k02", "k03"],
+            ["explicit", "k04", "k05", "k06", "k07"],
+            ["explicit", "k08", "k09", "k10", "k11"],
+        ]
+        assert trends.calls[1][0] == "explicit"
+        assert trends.calls[2][0] == "explicit"
+
+    anyio.run(exercise)
+
+
+class _AdsReturningSeed(FakeAds):
+    """historical_metrics may hand back a name expansion already dropped."""
+
+    async def historical_metrics(
+        self, keywords: Sequence[str], market: Market
+    ) -> list[KeywordIdea]:
+        ideas = await super().historical_metrics(keywords, market)
+        if all(idea.text != "seed" for idea in ideas):
+            ideas.append(
+                KeywordIdea(text="seed", metrics=KeywordMetrics(avg_monthly_searches=99_000))
+            )
+        return ideas
+
+
 def test_competitor_and_site_top_keys_are_ranked(settings: Settings) -> None:
     async def exercise() -> None:
         top = "volume leader"
@@ -585,7 +671,7 @@ def test_competitor_and_site_top_keys_are_ranked(settings: Settings) -> None:
                 for i, name in enumerate(names)
             ],
         )
-        ads = FakeAds(
+        ads = _AdsReturningSeed(
             log,
             ideas=[
                 KeywordIdea(
@@ -635,7 +721,9 @@ def test_competitor_and_site_top_keys_are_ranked(settings: Settings) -> None:
         niche_seed = next(
             (row for row in results["niche"].keywords if row.normalized == "seed"), None
         )
-        assert niche_seed is None or niche_seed.demand_status is None
+        assert niche_seed is not None
+        assert niche_seed.demand_status is None
+        assert niche_seed.demand_relative is None
         assert all("seed" not in batch for batch in trends_by_scenario["niche"].calls[1:])
         competitor_top = next(
             row for row in results["competitor"].keywords if row.normalized == top
@@ -729,9 +817,9 @@ def test_explicit_anchor_keeps_a_lower_mean(settings: Settings) -> None:
 def test_thousandfold_research_spread_emits_measured_fraction(settings: Settings) -> None:
     async def exercise() -> None:
         profiles = {
-            "tiny": _constant_profile(1, 8, weeks=8),
-            "giant": _constant_profile(1000, 8, weeks=8),
-            "mid": _constant_profile(2, 8, weeks=8),
+            "tiny": ([1] + [0] * 9, [True] * 10),
+            "giant": _constant_profile(100, 10, weeks=10),
+            "mid": _constant_profile(2, 10, weeks=10),
         }
         trends = MappedDemandTrends(profiles)
         context = ScenarioContext(
