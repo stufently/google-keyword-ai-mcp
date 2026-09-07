@@ -113,6 +113,24 @@ def measured_mean(result: TrendsResult, keyword: str) -> float | None:
     return fmean(values) if values else None
 
 
+def select_anchor_by_mean(result: TrendsResult, keywords: Sequence[str]) -> str | None:
+    """Pick the first keyword with the highest positive measured mean.
+
+    Keys without measured weeks and keys whose mean is zero are not eligible.
+    Ties keep the earliest name in `keywords`, not the order Google returned.
+    """
+    best: str | None = None
+    best_mean: float | None = None
+    for keyword in keywords:
+        mean = measured_mean(result, keyword)
+        if mean is None or mean == 0:
+            continue
+        if best_mean is None or mean > best_mean:
+            best = keyword
+            best_mean = mean
+    return best
+
+
 def _coverage(measured_weeks: int, weeks: int) -> float:
     if weeks == 0:
         return 0.0

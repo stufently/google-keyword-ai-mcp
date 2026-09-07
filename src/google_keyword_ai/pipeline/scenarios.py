@@ -10,6 +10,7 @@ from google_keyword_ai.demand import (
     KEYWORDS_PER_BATCH,
     DemandBatch,
     combine,
+    select_anchor_by_mean,
     select_research_candidates,
 )
 from google_keyword_ai.errors import GkaiError
@@ -417,10 +418,20 @@ async def _enrich_demand(
             else:
                 relevant.append(warning)
         context.warnings.extend(relevant)
-        if not result.timeline and relevant:
-            batches.append(DemandBatch(keywords=batch, reason=relevant[0]))
-        else:
-            batches.append(DemandBatch(keywords=batch, result=result))
+        demand_batch = (
+            DemandBatch(keywords=batch, reason=relevant[0])
+            if not result.timeline and relevant
+            else DemandBatch(keywords=batch, result=result)
+        )
+        if start == 0 and demand_batch.result is not None and context.demand_anchor is None:
+            chosen = select_anchor_by_mean(demand_batch.result, batch)
+            if chosen is not None:
+                anchor = chosen
+                demand_batch = DemandBatch(
+                    keywords=[anchor, *[key for key in batch if key != anchor]],
+                    result=demand_batch.result,
+                )
+        batches.append(demand_batch)
     rows = combine(batches, min_coverage=context.settings.demand_min_coverage)
     by_name = {row.keyword: row for row in rows}
     for keyword in keywords:
@@ -461,7 +472,9 @@ async def _research_data(
     details: dict[str, str] | None = None,
 ) -> ResearchData:
     relevance_fallback = _sort_keywords(keywords)
-    demand_stats = await _enrich_demand(context, keywords, demand_seed, used)
+    demand_stats = await _enrich_demand(
+        context, keywords, demand_seed if scenario == "niche" else None, used
+    )
     stopped_by = context.budget_guard.exhausted_reason()
     if (
         expansion is not None

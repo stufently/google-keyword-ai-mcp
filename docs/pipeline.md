@@ -65,20 +65,21 @@ gkai research "купить квартиру" --language ru --country RU \
   --demand-anchor "купить квартиру москва" --format markdown
 ```
 
-The seed is excluded by its normalized spelling, both as an anchor and as a
-participant. Here the seed means the query chosen for the scenario's existing
-single-key Trends request: the original topic for `niche`, the most notable
-keyword for `competitor`, and the highest-impression query for `site`.
-The pure `select_research_candidates` helper preserves the sorted order,
-normalizes and deduplicates the remaining candidates, and chooses the first
-one as anchor. `--demand-anchor` overrides that choice and implies `--demand`.
-The explicit anchor must be among these candidates, even if it would normally
-fall beyond the budget slice. An absent anchor, including the excluded seed,
-returns an `empty` refusal envelope. Candidate validation takes place after
-collection; a dry run cannot check membership.
+In `niche` the user query is excluded by its normalized spelling, both as an
+anchor and as a participant. `competitor` and `site` have no such seed: the
+Ads-notable or highest-impression key stays in the candidate set. The first
+comparison batch is assembled blindly from the remaining sorted candidates;
+after the response, `select_anchor_by_mean` picks the member with the highest
+positive measured mean, the batch plan is reordered so that name is first, and
+later batches reuse it. `--demand-anchor` overrides that choice and implies
+`--demand`, even when the explicit key has a lower mean. The explicit anchor
+must be among these candidates, even if it would normally fall beyond the
+budget slice. An absent anchor, including the excluded niche seed, returns an
+`empty` refusal envelope. Candidate validation takes place after collection; a
+dry run cannot check membership.
 
-Seed exclusion follows the task author's live experiment of 6–7 September 2026,
-using the same eight candidates from research of «купить квартиру»:
+Niche seed exclusion follows the task author's live experiment of 6–7 September
+2026, using the same eight candidates from research of «купить квартиру»:
 
 | Candidate | Seed anchor «купить квартиру» | Candidate anchor «купить квартиру москва» |
 |---|---:|---:|
@@ -90,9 +91,10 @@ using the same eight candidates from research of «купить квартиру
 | купить квартиру щелково | 0.000 | 3.060 |
 
 The broad seed compressed the tail into a measured zero. That zero must not be
-read as absence of demand. Choosing the first candidate is still a heuristic:
-an alphabetical tie can select a weak anchor. If its batch collapses, the rows
-explicitly receive `anchor_collapsed`; there is no automatic anchor replacement.
+read as absence of demand. The post-response mean selection is still limited
+to members of the first batch: a weak key that never entered that batch cannot
+become the anchor. If the chosen anchor collapses, the rows explicitly receive
+`anchor_collapsed`; there is no second replacement.
 
 ### Budget and statistics
 

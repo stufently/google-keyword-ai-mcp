@@ -1,4 +1,4 @@
-"""Thirty-two reversible demand mutations (M18-M20).
+"""Thirty-six reversible demand mutations (M18-M21).
 
 Run sequentially, never alongside edits/tests.
 
@@ -308,6 +308,38 @@ MUTATIONS = (
         "assert envelope.completeness is Completeness.COMPLETE",
         source=RESEARCH_SOURCE,
         test_file=RESEARCH_TEST_FILE,
+    ),
+    Mutation(
+        "M28",
+        "if best_mean is None or mean > best_mean:",
+        "if best_mean is None or mean < best_mean:",
+        "test_select_anchor_by_mean_picks_the_highest_mean",
+        'assert select_anchor_by_mean(result, ["low", "high", "mid"]) == "high"',
+    ),
+    Mutation(
+        "M29",
+        "if mean is None or mean == 0:",
+        "if mean is None:",
+        "test_select_anchor_by_mean_skips_zero_and_unmeasured",
+        'assert select_anchor_by_mean(result, ["zero", "missing"]) is None',
+    ),
+    Mutation(
+        "M30",
+        "                    keywords=[anchor, *[key for key in batch if key != anchor]],\n",
+        "                    keywords=batch,\n",
+        "test_blind_first_batch_reanchors_to_moscow_from_schelkovo",
+        "assert by_name[LIVE_MOSCOW].demand_relative == 100.0",
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "M31",
+        '        context, keywords, demand_seed if scenario == "niche" else None, used\n',
+        "        context, keywords, demand_seed, used\n",
+        "test_competitor_and_site_top_keys_are_ranked",
+        "assert competitor_top.demand_status is not None",
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
     ),
 )
 

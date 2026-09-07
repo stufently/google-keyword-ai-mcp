@@ -10,6 +10,7 @@ from google_keyword_ai.demand import (
     combine,
     measured_mean,
     plan_batches,
+    select_anchor_by_mean,
 )
 from google_keyword_ai.errors import InvalidConfigurationError
 from google_keyword_ai.providers.trends.models import TrendPoint, TrendsResult
@@ -504,3 +505,51 @@ def test_combine_uses_the_min_coverage_argument_not_the_environment(
     )
     assert row.relative_demand == 200.0
     assert row.status == "measured"
+
+
+def test_select_anchor_by_mean_picks_the_highest_mean() -> None:
+    result = series(["low", "high", "mid"], [[10, 50, 30], [10, 50, 30]])
+    assert select_anchor_by_mean(result, ["low", "high", "mid"]) == "high"
+    assert select_anchor_by_mean(result, ["mid", "low"]) == "mid"
+
+
+def test_select_anchor_by_mean_skips_zero_and_unmeasured() -> None:
+    result = series(
+        ["zero", "missing", "ok"],
+        [[0, 0, 20], [0, 0, 20]],
+        [[True, False, True], [True, False, True]],
+    )
+    assert measured_mean(result, "zero") == 0.0
+    assert measured_mean(result, "missing") is None
+    assert select_anchor_by_mean(result, ["zero", "missing", "ok"]) == "ok"
+    assert select_anchor_by_mean(result, ["zero", "missing"]) is None
+
+
+def test_select_anchor_by_mean_breaks_ties_by_input_order() -> None:
+    result = series(["second", "first"], [[40, 40]])
+    assert select_anchor_by_mean(result, ["first", "second"]) == "first"
+    assert select_anchor_by_mean(result, ["second", "first"]) == "second"
+
+
+def test_select_anchor_by_mean_returns_none_when_every_key_is_unusable() -> None:
+    result = series(["a", "b"], [[0, 0]], [[False, True]])
+    assert select_anchor_by_mean(result, ["a", "b"]) is None
+    assert select_anchor_by_mean(result, []) is None
+
+
+def test_thousandfold_spread_keeps_a_measured_fraction() -> None:
+    result = series(["tiny", "giant"], [[1, 1000]])
+    tiny_mean = measured_mean(result, "tiny")
+    giant_mean = measured_mean(result, "giant")
+    assert tiny_mean == 1.0
+    assert giant_mean == 1000.0
+    assert giant_mean / tiny_mean == 1000
+    assert select_anchor_by_mean(result, ["tiny", "giant"]) == "giant"
+    rows = combine([DemandBatch(keywords=["giant", "tiny"], result=result)])
+    by_key = {row.keyword: row for row in rows}
+    assert by_key["giant"].relative_demand == 100.0
+    assert by_key["giant"].status == DemandStatus.MEASURED
+    assert by_key["giant"].is_anchor is True
+    assert by_key["tiny"].relative_demand == 0.1
+    assert by_key["tiny"].status == DemandStatus.MEASURED
+    assert by_key["tiny"].is_anchor is False

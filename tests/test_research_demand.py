@@ -1,7 +1,7 @@
 """Research demand contracts: selection, budgets, statuses and consumer behavior."""
 
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import anyio
@@ -21,6 +21,7 @@ from google_keyword_ai.pipeline.scenarios import (
     ExistingSiteResearch,
     NewNicheResearch,
     ScenarioContext,
+    _enrich_demand,
 )
 from google_keyword_ai.providers.google_ads import KeywordIdea, KeywordMetrics
 from google_keyword_ai.providers.search_console import SearchAnalyticsRow
@@ -67,7 +68,7 @@ class DemandTrends:
                     formatted_time="week",
                     values=[
                         0
-                        if comparison and self.mode == "anchor_collapsed" and index == 0
+                        if comparison and self.mode == "anchor_collapsed"
                         else 40
                         if index == 0
                         else 0
@@ -199,9 +200,15 @@ def test_all_scenarios_share_optional_demand(
         assert len(trends.calls) == (3 if enabled else 1)
         if enabled:
             assert data.stats.demand is not None
-            assert data.stats.demand.anchor == "candidate 00"
             assert data.stats.demand.ranked == 9
-            assert all("seed" not in batch for batch in trends.calls[1:])
+            if scenario == "niche":
+                assert data.stats.demand.anchor == "candidate 00"
+                assert all("seed" not in batch for batch in trends.calls[1:])
+            else:
+                assert data.stats.demand.anchor == "seed"
+                assert all(batch[0] == "seed" for batch in trends.calls[1:])
+                seed_row = next(row for row in data.keywords if row.normalized == "seed")
+                assert seed_row.demand_status is not None
         else:
             assert data.stats.demand is None
             assert data.keywords
@@ -411,3 +418,340 @@ def test_ancillary_widget_failures_do_not_downgrade_demand(settings: Settings) -
     assert envelope.completeness is Completeness.COMPLETE
     assert "RELATED_QUERIES: offline" in data.data_quality.caveats
     assert all(row.demand_relative is not None for row in data.keywords)
+
+
+class MappedDemandTrends:
+    """Return weekly series by keyword name, independent of request order."""
+
+    def __init__(self, profiles: dict[str, tuple[list[int], list[bool]]]) -> None:
+        self.calls: list[list[str]] = []
+        self.profiles = profiles
+        self.warnings: list[str] = []
+
+    async def fetch(
+        self, keywords: Sequence[str], *, geo: str, timeframe: str, hl: str
+    ) -> TrendsResult:
+        self.calls.append(list(keywords))
+        weeks = max(len(self.profiles[name][0]) for name in keywords)
+        return TrendsResult(
+            keywords=list(keywords),
+            geo=geo,
+            timeframe=timeframe,
+            normalization_scope=hl,
+            retrieved_at=datetime(2026, 9, 7, tzinfo=UTC),
+            source="offline test",
+            timeline=[
+                TrendPoint(
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC) + timedelta(weeks=week),
+                    formatted_time=str(week),
+                    values=[
+                        self.profiles[name][0][week] if week < len(self.profiles[name][0]) else 0
+                        for name in keywords
+                    ],
+                    has_data=[
+                        self.profiles[name][1][week]
+                        if week < len(self.profiles[name][1])
+                        else False
+                        for name in keywords
+                    ],
+                )
+                for week in range(weeks)
+            ],
+        )
+
+
+def _constant_profile(value: int, measured: int, weeks: int = 52) -> tuple[list[int], list[bool]]:
+    return [value if index < measured else 0 for index in range(weeks)], [
+        index < measured for index in range(weeks)
+    ]
+
+
+LIVE_SCHELKOVO = "купить квартиру щелково"
+LIVE_MOSCOW = "купить квартиру москва"
+LIVE_PROFILES = {
+    LIVE_SCHELKOVO: ([3] * 12 + [4] + [0] * 39, [True] * 13 + [False] * 39),
+    LIVE_MOSCOW: _constant_profile(100, 52),
+    "купить квартиру мытищи": _constant_profile(5, 49),
+    "купить квартиру балашиха": _constant_profile(4, 37),
+    "купить квартиру химки": _constant_profile(4, 37),
+}
+
+
+def test_blind_first_batch_reanchors_to_moscow_from_schelkovo(settings: Settings) -> None:
+    async def exercise() -> None:
+        trends = MappedDemandTrends(LIVE_PROFILES)
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("ru", "RU"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+            trends=trends,
+            demand=True,
+        )
+        names = [
+            LIVE_SCHELKOVO,
+            LIVE_MOSCOW,
+            "купить квартиру мытищи",
+            "купить квартиру балашиха",
+            "купить квартиру химки",
+        ]
+        keywords = [
+            ResearchKeyword(keyword=name, normalized=name, discovered_from=["autocomplete"])
+            for name in names
+        ]
+        stats = await _enrich_demand(context, keywords, None, set())
+        by_name = {row.normalized: row for row in keywords}
+        assert stats is not None
+        assert stats.anchor == LIVE_MOSCOW
+        assert by_name[LIVE_MOSCOW].demand_relative == 100.0
+        schelkovo = by_name[LIVE_SCHELKOVO].demand_relative
+        assert schelkovo is not None
+        assert 3.0 < schelkovo < 3.2
+        assert trends.calls == [names]
+        assert all(LIVE_MOSCOW in batch for batch in trends.calls)
+
+    anyio.run(exercise)
+
+
+def test_reanchored_key_is_in_every_batch_without_extra_calls(settings: Settings) -> None:
+    async def exercise() -> None:
+        names = ["seed", "weak", "strong", *[f"candidate {i:02}" for i in range(2, 9)]]
+        profiles = {
+            "seed": _constant_profile(10, 8, weeks=8),
+            "weak": _constant_profile(1, 8, weeks=8),
+            "strong": _constant_profile(80, 8, weeks=8),
+            **{f"candidate {i:02}": _constant_profile(5, 8, weeks=8) for i in range(2, 9)},
+        }
+        log: list[str] = []
+        trends = MappedDemandTrends(profiles)
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+            expander=FakeExpander(
+                log,
+                [
+                    KeywordCandidate(
+                        raw=name,
+                        normalized=name,
+                        discovered_from=["autocomplete"],
+                        relevance=1000 - i,
+                    )
+                    for i, name in enumerate(names)
+                ],
+            ),
+            google_ads=FakeAds(log, ideas=[]),
+            search_console=FakeGsc(log, rows=[]),
+            trends=trends,
+            demand=True,
+        )
+        data = await NewNicheResearch("seed").run(context)
+        assert len(trends.calls) == 3
+        assert trends.calls[0] == ["seed"]
+        assert trends.calls[1] == ["weak", "strong", "candidate 02", "candidate 03", "candidate 04"]
+        assert trends.calls[2] == [
+            "strong",
+            "candidate 05",
+            "candidate 06",
+            "candidate 07",
+            "candidate 08",
+        ]
+        assert all("strong" in batch for batch in trends.calls[1:])
+        assert "weak" not in trends.calls[2]
+        assert data.stats.demand is not None
+        assert data.stats.demand.anchor == "strong"
+        assert data.stats.demand.batches == 2
+        strong = next(row for row in data.keywords if row.normalized == "strong")
+        weak = next(row for row in data.keywords if row.normalized == "weak")
+        assert strong.demand_relative == 100.0
+        assert weak.demand_relative == 1.25
+
+    anyio.run(exercise)
+
+
+def test_competitor_and_site_top_keys_are_ranked(settings: Settings) -> None:
+    async def exercise() -> None:
+        top = "volume leader"
+        names = ["seed", top, *[f"candidate {i:02}" for i in range(8)]]
+        log: list[str] = []
+        expander = FakeExpander(
+            log,
+            [
+                KeywordCandidate(
+                    raw=name,
+                    normalized=name,
+                    discovered_from=["autocomplete"],
+                    relevance=1000 - i,
+                )
+                for i, name in enumerate(names)
+            ],
+        )
+        ads = FakeAds(
+            log,
+            ideas=[
+                KeywordIdea(
+                    text=name,
+                    metrics=KeywordMetrics(
+                        avg_monthly_searches=50_000 if name == top else 1000 - i
+                    ),
+                )
+                for i, name in enumerate(names)
+            ],
+        )
+        gsc = FakeGsc(
+            log,
+            rows=[
+                SearchAnalyticsRow(
+                    keys={"query": name, "page": "/"},
+                    clicks=5,
+                    impressions=50_000 if name == top else 1000 - i,
+                    ctr=0.01,
+                    position=8,
+                )
+                for i, name in enumerate(names)
+            ],
+        )
+        trends_by_scenario: dict[str, DemandTrends] = {}
+        results: dict[str, ResearchData] = {}
+        for scenario, factory in (
+            ("niche", lambda: NewNicheResearch("seed")),
+            ("competitor", lambda: CompetitorResearch("example.com")),
+            ("site", lambda: ExistingSiteResearch("https://example.com/")),
+        ):
+            trends = DemandTrends()
+            trends_by_scenario[scenario] = trends
+            context = ScenarioContext(
+                settings=settings,
+                market=Market.parse("en", "US"),
+                budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+                expander=expander,
+                google_ads=ads,
+                search_console=gsc,
+                trends=trends,
+                demand=True,
+            )
+            trends.guard = context.budget_guard
+            results[scenario] = await factory().run(context)
+
+        niche_seed = next(
+            (row for row in results["niche"].keywords if row.normalized == "seed"), None
+        )
+        assert niche_seed is None or niche_seed.demand_status is None
+        assert all("seed" not in batch for batch in trends_by_scenario["niche"].calls[1:])
+        competitor_top = next(
+            row for row in results["competitor"].keywords if row.normalized == top
+        )
+        assert competitor_top.demand_status is not None
+        site_top = next(row for row in results["site"].keywords if row.normalized == top)
+        assert site_top.demand_status is not None
+
+    anyio.run(exercise)
+
+
+def test_zero_mean_blind_anchor_is_replaced_from_the_same_batch(settings: Settings) -> None:
+    async def exercise() -> None:
+        profiles = {
+            "seed": _constant_profile(10, 8, weeks=8),
+            "zero": ([0] * 8, [True] * 8),
+            "ok": _constant_profile(40, 8, weeks=8),
+            "other": _constant_profile(20, 8, weeks=8),
+        }
+        log: list[str] = []
+        trends = MappedDemandTrends(profiles)
+        names = ["seed", "zero", "ok", "other"]
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+            expander=FakeExpander(
+                log,
+                [
+                    KeywordCandidate(
+                        raw=name,
+                        normalized=name,
+                        discovered_from=["autocomplete"],
+                        relevance=1000 - i,
+                    )
+                    for i, name in enumerate(names)
+                ],
+            ),
+            google_ads=FakeAds(log, ideas=[]),
+            search_console=FakeGsc(log, rows=[]),
+            trends=trends,
+            demand=True,
+        )
+        data = await NewNicheResearch("seed").run(context)
+        assert data.stats.demand is not None
+        assert data.stats.demand.anchor == "ok"
+        by_name = {row.normalized: row for row in data.keywords}
+        assert by_name["ok"].demand_relative == 100.0
+        assert by_name["ok"].demand_status is DemandStatus.MEASURED
+        assert by_name["zero"].demand_relative == 0.0
+        assert by_name["zero"].demand_status is DemandStatus.MEASURED
+        assert by_name["other"].demand_relative == 50.0
+
+    anyio.run(exercise)
+
+
+def test_explicit_anchor_keeps_a_lower_mean(settings: Settings) -> None:
+    async def exercise() -> None:
+        names = [
+            LIVE_SCHELKOVO,
+            LIVE_MOSCOW,
+            "купить квартиру мытищи",
+            "купить квартиру балашиха",
+            "купить квартиру химки",
+        ]
+        trends = MappedDemandTrends(LIVE_PROFILES)
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("ru", "RU"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+            trends=trends,
+            demand=True,
+            demand_anchor=LIVE_SCHELKOVO,
+        )
+        keywords = [
+            ResearchKeyword(keyword=name, normalized=name, discovered_from=["autocomplete"])
+            for name in names
+        ]
+        stats = await _enrich_demand(context, keywords, None, set())
+        by_name = {row.normalized: row for row in keywords}
+        assert stats is not None
+        assert stats.anchor == LIVE_SCHELKOVO
+        assert by_name[LIVE_SCHELKOVO].demand_relative == 100.0
+        moscow = by_name[LIVE_MOSCOW].demand_relative
+        assert moscow is not None
+        assert moscow > 3000
+
+    anyio.run(exercise)
+
+
+def test_thousandfold_research_spread_emits_measured_fraction(settings: Settings) -> None:
+    async def exercise() -> None:
+        profiles = {
+            "tiny": _constant_profile(1, 8, weeks=8),
+            "giant": _constant_profile(1000, 8, weeks=8),
+            "mid": _constant_profile(2, 8, weeks=8),
+        }
+        trends = MappedDemandTrends(profiles)
+        context = ScenarioContext(
+            settings=settings,
+            market=Market.parse("en", "US"),
+            budget_guard=BudgetGuard(Budget(max_trends_calls=3)),
+            trends=trends,
+            demand=True,
+        )
+        keywords = [
+            ResearchKeyword(keyword=name, normalized=name, discovered_from=["autocomplete"])
+            for name in ("tiny", "giant", "mid")
+        ]
+        stats = await _enrich_demand(context, keywords, None, set())
+        by_name = {row.normalized: row for row in keywords}
+        assert stats is not None
+        assert stats.anchor == "giant"
+        assert by_name["giant"].demand_relative == 100.0
+        assert by_name["giant"].demand_status is DemandStatus.MEASURED
+        assert by_name["tiny"].demand_relative == 0.1
+        assert by_name["tiny"].demand_status is DemandStatus.MEASURED
+
+    anyio.run(exercise)
