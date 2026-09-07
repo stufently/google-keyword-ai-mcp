@@ -245,6 +245,8 @@ def test_the_error_guard_leaves_the_published_schemas_alone(
     tools = list_tools(tmp_path)
 
     assert len(tools) == 15
+    assert tools["research_keywords"].input_schema["properties"]["demand"]["default"] is False
+    assert tools["plan_research"].input_schema["properties"]["demand"]["default"] is False
     suggest = tools["suggest_keywords"]
     assert sorted(suggest.input_schema["properties"]) == ["country", "language", "limit", "query"]
     assert suggest.input_schema["required"] == ["query"]

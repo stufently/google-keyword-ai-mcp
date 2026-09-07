@@ -1,4 +1,4 @@
-"""Twenty-seven reversible demand mutations (M18-M20).
+"""Thirty-two reversible demand mutations (M18-M20).
 
 Run sequentially, never alongside edits/tests.
 
@@ -24,6 +24,10 @@ TEST_FILE = "tests/test_demand.py"
 USECASE_SOURCE = ROOT / "src/google_keyword_ai/usecases/demand.py"
 USECASE_TEST_FILE = "tests/test_demand_usecase.py"
 CONFIG_SOURCE = ROOT / "src/google_keyword_ai/config.py"
+RESEARCH_SOURCE = ROOT / "src/google_keyword_ai/usecases/research.py"
+RESEARCH_TEST_FILE = "tests/test_research_demand.py"
+RESEARCH_FACADE_TEST_FILE = "tests/test_research_demand_facades.py"
+MCP_SOURCE = ROOT / "src/google_keyword_ai/mcp/server.py"
 
 
 @dataclass(frozen=True)
@@ -250,6 +254,60 @@ MUTATIONS = (
         "assert reason is not None",
         source=ROOT / "src/google_keyword_ai/reports/markdown.py",
         test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "A",
+        '    demand: Annotated[bool, typer.Option("--demand")] = False,',
+        '    demand: Annotated[bool, typer.Option("--demand")] = True,',
+        "test_cli_omitted_demand_reaches_usecase_disabled",
+        'assert run.call_args.kwargs["demand"] is False',
+        source=ROOT / "src/google_keyword_ai/cli/main.py",
+        test_file=RESEARCH_FACADE_TEST_FILE,
+    ),
+    Mutation(
+        "B",
+        "    def research_keywords(\n        target: str,\n        demand: bool = False,",
+        "    def research_keywords(\n        target: str,\n        demand: bool = True,",
+        "test_mcp_omitted_demand_reaches_usecase_disabled[research_keywords]",
+        'assert run.call_args.kwargs["demand"] is False',
+        source=MCP_SOURCE,
+        test_file=RESEARCH_FACADE_TEST_FILE,
+    ),
+    Mutation(
+        "C",
+        "    def plan_research(\n        target: str,\n        demand: bool = False,",
+        "    def plan_research(\n        target: str,\n        demand: bool = True,",
+        "test_mcp_omitted_demand_reaches_usecase_disabled[plan_research]",
+        'assert run.call_args.kwargs["demand"] is False',
+        source=MCP_SOURCE,
+        test_file=RESEARCH_FACADE_TEST_FILE,
+    ),
+    Mutation(
+        "D",
+        "    if data.stats.demand is not None and data.stats.demand.truncated_by_budget:\n"
+        "        return Envelope(\n"
+        "            data=data,\n"
+        "            warnings=reported,\n"
+        "            errors=errors,\n"
+        "            completeness=Completeness.PARTIAL,\n"
+        '            completeness_reason=f"Demand subset truncated by '
+        '{data.stats.stopped_by} budget.",\n'
+        "            run_id=run_id,\n"
+        "        )\n",
+        "",
+        "test_budget_truncation_is_partial_and_named",
+        'assert "max_trends_calls" in (envelope.completeness_reason or "")',
+        source=RESEARCH_SOURCE,
+        test_file=RESEARCH_TEST_FILE,
+    ),
+    Mutation(
+        "E",
+        "if keyword.demand_status is not None and keyword.demand_relative is None",
+        "if keyword.demand_relative is None",
+        "test_all_scenarios_share_optional_demand[False-niche]",
+        "assert envelope.completeness is Completeness.COMPLETE",
+        source=RESEARCH_SOURCE,
+        test_file=RESEARCH_TEST_FILE,
     ),
 )
 

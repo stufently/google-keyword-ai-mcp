@@ -204,6 +204,8 @@ def test_all_scenarios_share_optional_demand(
             assert all("seed" not in batch for batch in trends.calls[1:])
         else:
             assert data.stats.demand is None
+            assert data.keywords
+            assert all(row.demand_status is None for row in data.keywords)
             assert all(
                 value is None
                 for row in data.keywords
@@ -211,6 +213,8 @@ def test_all_scenarios_share_optional_demand(
                 if key.startswith("demand_")
             )
             assert "Relative demand" not in render_markdown(data, [], [])
+            envelope = _envelope_for_research(data, context.warnings, context.errors)
+            assert envelope.completeness is Completeness.COMPLETE
 
     anyio.run(exercise)
 
@@ -230,7 +234,10 @@ def test_demand_batches_are_recorded_in_spend(settings: Settings) -> None:
 
 def test_budget_truncation_is_partial_and_named(settings: Settings) -> None:
     data, context, _ = anyio.run(partial(niche, settings))
+    unrelated_warning = "Optional source is unavailable."
+    context.warnings.insert(0, unrelated_warning)
     envelope = _envelope_for_research(data, context.warnings, context.errors)
+    assert unrelated_warning in envelope.warnings
     assert data.stats.demand is not None
     assert data.stats.demand.truncated_by_budget is True
     assert data.stats.demand.requested == 12

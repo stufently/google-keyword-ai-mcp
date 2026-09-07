@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import cast
+from unittest.mock import Mock
 
 import anyio
 import httpx
@@ -16,8 +17,9 @@ from typer.testing import CliRunner
 
 from google_keyword_ai.cli import main as cli_main
 from google_keyword_ai.config import Settings
-from google_keyword_ai.envelope import Completeness
+from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.market import Market
+from google_keyword_ai.mcp import server as mcp_server
 from google_keyword_ai.mcp.server import build_server
 from google_keyword_ai.pipeline.budget import Budget, BudgetGuard
 from google_keyword_ai.pipeline.models import DryRunPlan, ResearchData
@@ -70,6 +72,57 @@ def mock_research_http(router: respx.MockRouter) -> list[list[str]]:
 
     router.get(PRIMARY_ENDPOINT).mock(side_effect=suggest)
     return mock_trends(router)
+
+
+def test_cli_omitted_demand_reaches_usecase_disabled(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run = Mock(return_value=Envelope(data=None))
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_research", run)
+
+    result = CliRunner().invoke(cli_main.app, ["research", "seed"])
+
+    assert result.exit_code == 0, result.output
+    run.assert_called_once()
+    assert run.call_args.args == (settings, "seed")
+    assert run.call_args.kwargs["demand"] is False
+    assert run.call_args.kwargs["demand_anchor"] is None
+
+
+def test_cli_dry_run_demand_is_opt_in(settings: Settings, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    runner = CliRunner()
+    ordinary = runner.invoke(cli_main.app, ["research", "seed", "--dry-run"])
+    ranked = runner.invoke(cli_main.app, ["research", "seed", "--dry-run", "--demand"])
+
+    assert ordinary.exit_code == 0, ordinary.output
+    assert ranked.exit_code == 0, ranked.output
+    ordinary_plan = json.loads(ordinary.stdout)["data"]
+    ranked_plan = json.loads(ranked.stdout)["data"]
+    demand_step = "Rank candidate demand after sorting, excluding the seed"
+    assert ordinary_plan["estimated_trends_calls"] == 1
+    assert demand_step not in ordinary_plan["steps"]
+    assert ranked_plan["estimated_trends_calls"] == 3
+    assert demand_step in ranked_plan["steps"]
+
+
+@pytest.mark.parametrize("name", ["research_keywords", "plan_research"])
+def test_mcp_omitted_demand_reaches_usecase_disabled(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    run = Mock(return_value=Envelope(data=None))
+    monkeypatch.setattr(mcp_server, "run_research", run)
+    tool = build_server(settings)._tool_manager.get_tool(name)
+    assert tool is not None
+
+    tool.fn(target="seed")
+
+    run.assert_called_once()
+    assert run.call_args.args == (settings, "seed")
+    assert run.call_args.kwargs["demand"] is False
+    assert run.call_args.kwargs["demand_anchor"] is None
+    assert run.call_args.kwargs["dry_run"] is (name == "plan_research")
 
 
 @pytest.mark.parametrize("anchor", ["outside", " SEED "])
