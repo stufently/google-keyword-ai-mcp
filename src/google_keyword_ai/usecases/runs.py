@@ -9,7 +9,7 @@ from google_keyword_ai.config import Settings
 from google_keyword_ai.envelope import Completeness, Envelope
 from google_keyword_ai.market import Market
 from google_keyword_ai.pipeline.executor import RunExecutor, scenario_stages
-from google_keyword_ai.pipeline.models import ResearchData
+from google_keyword_ai.pipeline.models import ResearchData, ResearchDemandOptions
 from google_keyword_ai.pipeline.runs import RunRecord, RunStatus, RunStore
 from google_keyword_ai.storage.engine import open_database
 from google_keyword_ai.usecases.research import (
@@ -116,7 +116,12 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
             return _missing(record.run_id)
         market = Market.parse(current.language, current.country)
         cache = SqliteCache(engine, settings)
+        demand = ResearchDemandOptions.model_validate(
+            current.config_snapshot.get("research_demand", {})
+        )
         async with _live_context(settings, market, current.budget, cache) as context:
+            context.demand = demand.enabled
+            context.demand_anchor = demand.anchor
             scenario = _scenario_for_name(current.scenario, current.target, current.seed_keyword)
             stages = scenario_stages(
                 current.scenario,
@@ -124,6 +129,8 @@ async def _resume_async(settings: Settings, record: RunRecord) -> Envelope[Resea
                 market=market,
                 budget=current.budget,
                 seed_keyword=current.seed_keyword,
+                demand=demand.enabled,
+                demand_anchor=demand.anchor,
             )
             executor = RunExecutor(store, scenario, stages)
             # The status has to describe THIS attempt. `finish` below reads it
@@ -202,6 +209,7 @@ def run_rerun(settings: Settings, run_id: str) -> Envelope[ResearchData | None]:
         engine.dispose()
     if record is None:
         return _missing(run_id)
+    demand = ResearchDemandOptions.model_validate(record.config_snapshot.get("research_demand", {}))
     result = run_research(
         settings,
         record.target,
@@ -212,5 +220,7 @@ def run_rerun(settings: Settings, run_id: str) -> Envelope[ResearchData | None]:
         seed_keyword=record.seed_keyword,
         limit=record.limit,
         save_run=True,
+        demand=demand.enabled,
+        demand_anchor=demand.anchor,
     )
     return cast("Envelope[ResearchData | None]", result)

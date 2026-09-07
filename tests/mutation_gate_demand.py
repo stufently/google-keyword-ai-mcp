@@ -1,4 +1,6 @@
-"""Twenty-one reversible demand mutations. Run sequentially, never alongside edits/tests.
+"""Twenty-seven reversible demand mutations (M18-M20).
+
+Run sequentially, never alongside edits/tests.
 
 Each mutant must fail its own test at its designated assertion. Every target
 first passes on the original source, including when running with --only.
@@ -197,6 +199,57 @@ MUTATIONS = (
         'MEASURED = "observed"',
         "test_demand_status_protocol_literals_are_fixed",
         'assert DemandStatus.MEASURED.value == "measured"',
+    ),
+    Mutation(
+        "M22",
+        "and key != normalized_seed",
+        "and True",
+        "test_selector_excludes_normalized_seed",
+        'assert "seed" not in [anchor, *participants]',
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "M23",
+        "selected_anchor = candidates[0] if anchor is None else anchor",
+        "selected_anchor = candidates[-1] if anchor is None else anchor",
+        "test_selector_uses_top_candidate_as_anchor",
+        'assert anchor == "top"',
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "M24",
+        "capacity = 1 + KEYWORDS_PER_BATCH * batches",
+        "capacity = KEYWORDS_PER_BATCH * batches",
+        "test_selector_reserves_room_for_anchor",
+        "assert len([anchor, *participants]) == 9",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "M25",
+        '        guard.spend("trends")\n',
+        "",
+        "test_demand_batches_are_recorded_in_spend",
+        "assert data.stats.spend.trends_calls == 3",
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "M26",
+        "if 1 + len(participants) < stats.requested:",
+        "if False:",
+        "test_budget_truncation_is_partial_and_named",
+        "assert data.stats.demand.truncated_by_budget is True",
+        source=ROOT / "src/google_keyword_ai/pipeline/scenarios.py",
+        test_file="tests/test_research_demand.py",
+    ),
+    Mutation(
+        "M27",
+        '    raise ValueError(f"Unknown demand status: {status!r}")',
+        '    return "unavailable"',
+        "test_renderer_refuses_unknown_demand_status",
+        "assert reason is not None",
+        source=ROOT / "src/google_keyword_ai/reports/markdown.py",
+        test_file="tests/test_research_demand.py",
     ),
 )
 

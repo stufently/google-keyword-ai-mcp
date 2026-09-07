@@ -15,6 +15,35 @@ MAX_DEMAND_KEYWORDS = 50
 KEYWORDS_PER_BATCH = 4
 
 
+def select_research_candidates(
+    keywords: Sequence[str], seed: str | None, batches: int, *, anchor: str | None = None
+) -> tuple[str | None, list[str]]:
+    """Select normalized research keys in their existing order, excluding the seed.
+
+    The explicit anchor is validated against all candidates before budget slicing.
+    Unlike the standalone command, research can span more than fifty keywords.
+    """
+    normalized_seed = normalize_keyword(seed or "")
+    candidates = list(
+        dict.fromkeys(
+            key for raw in keywords if (key := normalize_keyword(raw)) and key != normalized_seed
+        )
+    )
+    if anchor is not None:
+        anchor = normalize_keyword(anchor)
+        if anchor not in candidates:
+            raise InvalidConfigurationError(
+                "The explicit demand anchor must be present among research candidates "
+                "after excluding the seed."
+            )
+    if batches <= 0 or not candidates:
+        return None, []
+    selected_anchor = candidates[0] if anchor is None else anchor
+    capacity = 1 + KEYWORDS_PER_BATCH * batches
+    participants = [key for key in candidates if key != selected_anchor][: capacity - 1]
+    return selected_anchor, participants
+
+
 class DemandStatus(StrEnum):
     MEASURED = "measured"
     LOW_COVERAGE = "low_coverage"

@@ -46,11 +46,15 @@ def scenario_stages(
     market: Market,
     budget: Budget,
     seed_keyword: str | None = None,
+    demand: bool = False,
+    demand_anchor: str | None = None,
 ) -> list[Stage]:
     try:
         names = _STAGE_NAMES[scenario_name]
     except KeyError as exc:
         raise ValueError(f"Unknown research scenario: {scenario_name}.") from exc
+    if demand or demand_anchor is not None:
+        names = (*names, "demand")
     return [
         Stage(
             name=name,
@@ -62,6 +66,11 @@ def scenario_stages(
                 "country": market.country,
                 "budget": budget.model_dump(mode="json"),
                 "seed_keyword": seed_keyword,
+                **(
+                    {"demand": True, "demand_anchor": demand_anchor}
+                    if demand or demand_anchor is not None
+                    else {}
+                ),
             },
         )
         for position, name in enumerate(names)
@@ -79,6 +88,7 @@ def _source_for_stage(name: str) -> str | None:
         "ads_ideas": "google_ads",
         "gsc_query": "search_console",
         "trends": "trends",
+        "demand": "trends",
     }.get(name)
 
 

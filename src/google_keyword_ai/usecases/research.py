@@ -191,11 +191,15 @@ async def _execute(
     seed_keyword: str | None,
     budget: Budget,
     limit: int | None,
+    demand: bool = False,
+    demand_anchor: str | None = None,
 ) -> tuple[ResearchData, list[str], list[str]]:
     engine = open_database(settings)
     try:
         cache = SqliteCache(engine, settings)
         async with _live_context(settings, market, budget, cache) as context:
+            context.demand = demand
+            context.demand_anchor = demand_anchor
             selected = await _select_scenario(context, scenario, target, seed_keyword)
             data = await selected.run(context)
             if limit is not None:
@@ -257,6 +261,23 @@ def _envelope_for_research(
             completeness_reason=reason,
             run_id=run_id,
         )
+    if data.stats.demand is not None and data.stats.demand.truncated_by_budget:
+        return Envelope(
+            data=data,
+            warnings=reported,
+            errors=errors,
+            completeness=Completeness.PARTIAL,
+            completeness_reason=f"Demand subset truncated by {data.stats.stopped_by} budget.",
+            run_id=run_id,
+        )
+    missing_demand = [
+        keyword
+        for keyword in data.keywords
+        if keyword.demand_status is not None and keyword.demand_relative is None
+    ]
+    if missing_demand and not warnings and not errors:
+        warnings = [f"Demand unavailable: {missing_demand[0].demand_reason}"]
+        reported = warnings + list(notices or [])
     if warnings or errors or data.stats.stopped_by is not None:
         reason = (
             errors[0]
@@ -284,6 +305,8 @@ async def _execute_saved(
     seed_keyword: str | None,
     budget: Budget,
     limit: int | None,
+    demand: bool = False,
+    demand_anchor: str | None = None,
 ) -> Envelope[ResearchData]:
     engine = open_database(settings)
     try:
@@ -297,6 +320,8 @@ async def _execute_saved(
             market=market,
             budget=budget,
             seed_keyword=seed_keyword,
+            demand=demand,
+            demand_anchor=demand_anchor,
         )
         pending_stages = [
             StageRecord(
@@ -320,13 +345,22 @@ async def _execute_saved(
             budget=budget,
             seed_keyword=seed_keyword,
             limit=limit,
-            config_snapshot=masked_dump(settings),
+            config_snapshot={
+                **masked_dump(settings),
+                **(
+                    {"research_demand": {"enabled": demand, "anchor": demand_anchor}}
+                    if demand
+                    else {}
+                ),
+            },
             created_at=now,
             updated_at=now,
             stages=pending_stages,
         )
         store.create(record)
         async with _live_context(settings, market, budget, cache) as context:
+            context.demand = demand
+            context.demand_anchor = demand_anchor
             selected = await _select_scenario(context, scenario, target, seed_keyword)
             scenario_name = selected.plan(_dry_context(settings, market, budget)).scenario
             if scenario_name != preliminary_name:
@@ -336,6 +370,8 @@ async def _execute_saved(
                     market=market,
                     budget=budget,
                     seed_keyword=seed_keyword,
+                    demand=demand,
+                    demand_anchor=demand_anchor,
                 )
                 pending_stages = [
                     StageRecord(
@@ -396,6 +432,8 @@ def run_research(
     dry_run: bool = False,
     limit: int | None = None,
     save_run: bool = False,
+    demand: bool = False,
+    demand_anchor: str | None = None,
 ) -> Envelope[ResearchData] | Envelope[DryRunPlan]:
     if scenario not in _SCENARIOS:
         raise InvalidConfigurationError(f"Unknown research scenario: {scenario}.")
@@ -405,38 +443,31 @@ def run_research(
         settings.default_country if country is None else country,
     )
     active_budget = Budget() if budget is None else budget
+    demand = demand or demand_anchor is not None
     if dry_run:
         context = _dry_context(settings, market, active_budget)
         selected = _dry_scenario(scenario, target, seed_keyword)
-        return Envelope(data=selected.plan(context))
+        plan = selected.plan(context)
+        if demand:
+            plan.steps.append("Rank candidate demand after sorting, excluding the seed")
+            plan.estimated_trends_calls = active_budget.max_trends_calls
+        return Envelope(data=plan)
 
     if save_run:
-        return anyio.run(
-            partial(
-                _execute_saved,
-                settings,
-                target,
-                scenario,
-                market,
-                seed_keyword,
-                active_budget,
-                limit,
-            )
+        saved_execute = partial(
+            _execute_saved, settings, target, scenario, market, seed_keyword, active_budget, limit
         )
+        if demand:
+            saved_execute = partial(saved_execute, demand=demand, demand_anchor=demand_anchor)
+        return anyio.run(saved_execute)
 
+    execute = partial(
+        _execute, settings, target, scenario, market, seed_keyword, active_budget, limit
+    )
+    if demand:
+        execute = partial(execute, demand=demand, demand_anchor=demand_anchor)
     try:
-        data, warnings, errors = anyio.run(
-            partial(
-                _execute,
-                settings,
-                target,
-                scenario,
-                market,
-                seed_keyword,
-                active_budget,
-                limit,
-            )
-        )
+        data, warnings, errors = anyio.run(execute)
     except GkaiError as exc:
         empty_context = _dry_context(settings, market, active_budget)
         selected = _dry_scenario(scenario, target, seed_keyword)

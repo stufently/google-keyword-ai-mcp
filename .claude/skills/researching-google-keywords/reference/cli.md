@@ -98,12 +98,30 @@ incomplete states exit 1 with valid JSON on stdout.
 gkai competitor competitor.com --seed-keyword shoes --language en --country US
 gkai research "running shoes" --language en --country US --dry-run
 gkai research "running shoes" --language en --country US --save-run
+gkai research "running shoes" --language en --country US --demand
+gkai research "running shoes" --demand-anchor "running shoes women" --format markdown
 ```
 
 `gkai competitor` returns Google Ads ideas associated with a site or URL. `gkai
 research` selects `niche`, `competitor`, or `site` with `--scenario auto`; budgets
 include `--max-keywords`, `--max-autocomplete-queries`, `--max-ads-calls`,
 `--max-trends-calls`, and `--max-runtime`.
+
+`--demand` is off by default. It adds an anchor-relative demand column after
+sorting; `--demand-anchor <keyword>` selects an explicit candidate anchor and
+also enables demand. The normalized seed used for single-key Trends is excluded
+from both anchor selection and participants. An explicit anchor outside the
+remaining candidate set produces an `empty` envelope (exit 1).
+
+The remaining Trends budget admits one anchor plus four participants per batch:
+the default three calls leave two batches after seed Trends, or nine keys.
+`stats.demand` reports `anchor`, `requested`, `ranked`, `batches`, and
+`truncated_by_budget`; truncation produces `partial` with the budget named.
+`demand_status=null` means unranked, separately from the five ranked statuses
+`measured`, `low_coverage`, `below_resolution`, `anchor_collapsed`, `batch_failed`.
+Missing numbers in ranked rows also produce `partial` (exit 1).
+`--dry-run` includes the optional stage and its call estimate; `--save-run`
+preserves demand options for resume/rerun. See [pipeline](../../../../docs/pipeline.md).
 
 ## Google Ads
 

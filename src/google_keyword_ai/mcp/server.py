@@ -250,6 +250,8 @@ def build_server(settings: Settings | None = None) -> MCPServer:
     @tool()
     def research_keywords(
         target: str,
+        demand: bool = False,
+        demand_anchor: str | None = None,
         scenario: str = "auto",
         language: str | None = None,
         country: str | None = None,
@@ -273,6 +275,8 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             language=language,
             country=country,
             seed_keyword=seed_keyword,
+            demand=demand,
+            demand_anchor=demand_anchor,
             budget=_budget(
                 max_keywords,
                 max_autocomplete_queries,
@@ -294,6 +298,8 @@ def build_server(settings: Settings | None = None) -> MCPServer:
     @tool()
     def plan_research(
         target: str,
+        demand: bool = False,
+        demand_anchor: str | None = None,
         scenario: str = "auto",
         language: str | None = None,
         country: str | None = None,
@@ -311,6 +317,8 @@ def build_server(settings: Settings | None = None) -> MCPServer:
             language=language,
             country=country,
             seed_keyword=seed_keyword,
+            demand=demand,
+            demand_anchor=demand_anchor,
             budget=_budget(
                 max_keywords,
                 max_autocomplete_queries,

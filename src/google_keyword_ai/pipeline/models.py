@@ -2,6 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from google_keyword_ai.demand import DemandStatus
 from google_keyword_ai.opportunities import Opportunity
 from google_keyword_ai.pipeline.budget import BudgetSpend
 from google_keyword_ai.providers.expander import ExpansionStats
@@ -29,10 +30,31 @@ class ResearchKeyword(BaseModel):
     gsc_clicks: int | None = None
     gsc_ctr: float | None = None
     gsc_position: float | None = None
+    demand_relative: float | None = None
+    demand_status: DemandStatus | None = None
+    demand_measured_weeks: int | None = None
+    demand_weeks: int | None = None
+    demand_reason: str | None = None
+
+
+class ResearchDemandStats(BaseModel):
+    anchor: str | None = None
+    ranked: int = 0
+    requested: int = 0
+    batches: int = 0
+    truncated_by_budget: bool = False
+
+
+class ResearchDemandOptions(BaseModel):
+    """Stored in the existing run config snapshot, including for interrupted runs."""
+
+    enabled: bool = False
+    anchor: str | None = None
 
 
 class ResearchStats(BaseModel):
     expansion: ExpansionStats | None = None
+    demand: ResearchDemandStats | None = None
     spend: BudgetSpend
     stopped_by: str | None = None
 

@@ -406,6 +406,8 @@ def competitor(
 @app.command()
 def research(
     target: str,
+    demand: Annotated[bool, typer.Option("--demand")] = False,
+    demand_anchor: Annotated[str | None, typer.Option("--demand-anchor")] = None,
     scenario: Annotated[str, typer.Option("--scenario")] = "auto",
     language: Annotated[str | None, typer.Option("--language")] = None,
     country: Annotated[str | None, typer.Option("--country")] = None,
@@ -442,6 +444,8 @@ def research(
             dry_run=dry_run,
             limit=limit,
             save_run=save_run,
+            demand=demand,
+            demand_anchor=demand_anchor,
         )
     except GkaiError as exc:
         # A refused request produced no research, so markdown has nothing to

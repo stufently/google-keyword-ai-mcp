@@ -23,7 +23,7 @@ src/google_keyword_ai/
   targets.py                                             # разбор цели-конкурента
   http.py ratelimit.py cache.py normalize.py             # инфраструктура
   expansion.py scoring.py clustering.py opportunities.py # алгоритмы
-  demand.py                                              # чистый якорный пересчёт Trends
+  demand.py                                              # якорный пересчёт и чистый отбор кандидатов research
   storage/     engine.py migrations.py                   # SQLite, user_version
   providers/   autocomplete.py expander.py google_ads.py search_console.py
                trends/{models,unofficial,official,provider}.py
@@ -60,6 +60,11 @@ src/google_keyword_ai/
   валидирует выход по типу, и инструмент, не умеющий сказать `data: null`, не
   смог бы доложить собственный отказ.
 - **Три сценария вместо одной цепочки:** ниша, конкурент, существующий сайт.
+- **Спрос по запросу:** общий шаг после сортировки сценариев исключает сид,
+  выбирает якорь среди кандидатов и расходует оставшийся бюджет Trends.
+  Пять статусов demand обрабатываются Markdown явно; `None` означает, что
+  ключ не ранжировали. Опции сохраняются в config snapshot прогона, стадия
+  `demand` входит в fingerprints только при запросе столбца (M20).
 - **Запуски персистентны:** стадии, отпечатки входов, продолжение и перезапуск.
 - **Миграции forward-only** через `PRAGMA user_version`, без alembic;
   WAL + `busy_timeout` + `foreign_keys` выставляются явно.

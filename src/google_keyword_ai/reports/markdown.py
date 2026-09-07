@@ -1,7 +1,8 @@
 from collections.abc import Sequence
 
 from google_keyword_ai.clustering import KeywordCluster, tokenize
-from google_keyword_ai.pipeline.models import ResearchData
+from google_keyword_ai.demand import DemandStatus
+from google_keyword_ai.pipeline.models import ResearchData, ResearchKeyword
 from google_keyword_ai.scoring import (
     KeywordScore,
     compute_trend_growth,
@@ -12,6 +13,23 @@ from google_keyword_ai.scoring import (
 
 def _cell(value: object) -> str:
     return str(value).replace("|", "\\|").replace("\n", " ")
+
+
+def _demand_cell(keyword: ResearchKeyword) -> str:
+    status = keyword.demand_status
+    if status is None:
+        return "not ranked"
+    if status == DemandStatus.MEASURED:
+        return f"{keyword.demand_relative:.3f} (measured)"
+    if status == DemandStatus.LOW_COVERAGE:
+        return "unavailable (low_coverage: insufficient measured weeks)"
+    if status == DemandStatus.BELOW_RESOLUTION:
+        return "unavailable (below_resolution: below the anchor's resolution)"
+    if status == DemandStatus.ANCHOR_COLLAPSED:
+        return "unavailable (anchor_collapsed: no usable anchor)"
+    if status == DemandStatus.BATCH_FAILED:
+        return "unavailable (batch_failed: provider failure)"
+    raise ValueError(f"Unknown demand status: {status!r}")
 
 
 def _list_or_none(values: Sequence[str], missing: str) -> list[str]:
@@ -126,6 +144,36 @@ def render_markdown(
             "once per run, so this figure describes that series and not the keywords listed "
             "above."
         )
+
+    if data.stats.demand is not None or any(k.demand_status is not None for k in data.keywords):
+        lines.extend(["", "## Relative demand", ""])
+        if data.stats.demand is not None:
+            stats = data.stats.demand
+            lines.append(
+                f"Anchor: {_cell(stats.anchor)} (=100); ranked {stats.ranked} of "
+                f"{stats.requested} candidates in {stats.batches} batches."
+            )
+            if stats.truncated_by_budget:
+                lines.append(f"Demand truncated by {_cell(data.stats.stopped_by)} budget.")
+        lines.extend(
+            [
+                "Values are relative to the candidate anchor, not absolute search volumes.",
+                "",
+                "| Keyword | Relative demand | Measured weeks | Reason |",
+                "|---|---:|---:|---|",
+            ]
+        )
+        for keyword in data.keywords:
+            value = _demand_cell(keyword)
+            coverage = (
+                "—"
+                if keyword.demand_status is None
+                else f"{keyword.demand_measured_weeks}/{keyword.demand_weeks}"
+            )
+            lines.append(
+                f"| {_cell(keyword.keyword)} | {value} | {coverage} | "
+                f"{_cell(keyword.demand_reason or '—')} |"
+            )
 
     lines.extend(["", "## Long-tail opportunities", ""])
     score_by_keyword = {score.keyword: score for score in scores}

@@ -6,6 +6,12 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Protocol, cast
 
 from google_keyword_ai.config import Settings
+from google_keyword_ai.demand import (
+    KEYWORDS_PER_BATCH,
+    DemandBatch,
+    combine,
+    select_research_candidates,
+)
 from google_keyword_ai.errors import GkaiError
 from google_keyword_ai.expansion import ExpansionStrategy
 from google_keyword_ai.market import Market
@@ -16,6 +22,7 @@ from google_keyword_ai.pipeline.models import (
     DataQuality,
     DryRunPlan,
     ResearchData,
+    ResearchDemandStats,
     ResearchKeyword,
     ResearchStats,
     SourceUsage,
@@ -100,6 +107,11 @@ class ScenarioContext:
     settings: Settings
     market: Market
     budget_guard: BudgetGuard
+    demand: bool = False
+    demand_anchor: str | None = None
+    # Optional widget failures do not invalidate timeline demand. Persist them
+    # as quality caveats so replay cannot reinterpret them as missing research.
+    demand_notices: list[str] = field(default_factory=list)
     autocomplete: object | None = None
     google_ads: AdsLike | None = None
     trends: TrendsLike | None = None
@@ -339,11 +351,107 @@ def _cap[T](
     return items[:limit]
 
 
-def _research_data(
+async def _enrich_demand(
+    context: ScenarioContext,
+    keywords: list[ResearchKeyword],
+    seed: str | None,
+    used: set[str],
+) -> ResearchDemandStats | None:
+    if not context.demand and context.demand_anchor is None:
+        return None
+    names = [keyword.keyword for keyword in keywords]
+    full_anchor, full_participants = select_research_candidates(
+        names, seed, len(names), anchor=context.demand_anchor
+    )
+    stats = ResearchDemandStats(
+        requested=(1 + len(full_participants)) if full_anchor is not None else 0
+    )
+    guard = context.budget_guard
+    remaining = max(0, guard.budget.max_trends_calls - guard.spend.trends_calls)
+    anchor, participants = select_research_candidates(
+        names, seed, remaining, anchor=context.demand_anchor
+    )
+    if stats.requested > 0 and remaining == 0:
+        guard.mark_cut("trends")
+        stats.truncated_by_budget = True
+        context.warnings.append(
+            "Demand was not ranked: max_trends_calls budget has no batches left."
+        )
+        return stats
+    if anchor is None or not participants:
+        context.warnings.append(
+            "Demand was not ranked: at least two non-seed candidates are needed."
+        )
+        return stats
+    if 1 + len(participants) < stats.requested:
+        guard.mark_cut("trends")
+        stats.truncated_by_budget = True
+    if context.trends is None:
+        context.warnings.append("Demand was not ranked: Google Trends is unavailable.")
+        return stats
+
+    batches: list[DemandBatch] = []
+    for start in range(0, len(participants), KEYWORDS_PER_BATCH):
+        if not guard.can_spend("trends"):
+            stats.truncated_by_budget = True
+            break
+        batch = [anchor, *participants[start : start + KEYWORDS_PER_BATCH]]
+        guard.spend("trends")
+        stats.batches += 1
+        used.add("trends")
+        try:
+            result = await context.trends.fetch(
+                batch,
+                geo=context.market.trends_geo(),
+                timeframe="today 12-m",
+                hl=context.market.language,
+            )
+        except GkaiError as exc:
+            context.errors.append(str(exc))
+            batches.append(DemandBatch(keywords=batch, reason=str(exc)))
+            continue
+        relevant: list[str] = []
+        for warning in cast(list[str], getattr(context.trends, "warnings", [])):
+            if warning.startswith(("RELATED_QUERIES", "GEO_MAP")):
+                context.demand_notices.append(warning)
+            else:
+                relevant.append(warning)
+        context.warnings.extend(relevant)
+        if not result.timeline and relevant:
+            batches.append(DemandBatch(keywords=batch, reason=relevant[0]))
+        else:
+            batches.append(DemandBatch(keywords=batch, result=result))
+    rows = combine(batches, min_coverage=context.settings.demand_min_coverage)
+    by_name = {row.keyword: row for row in rows}
+    for keyword in keywords:
+        row = by_name.get(keyword.normalized)
+        if row is not None:
+            keyword.demand_relative = row.relative_demand
+            keyword.demand_status = row.status
+            keyword.demand_measured_weeks = row.measured_weeks
+            keyword.demand_weeks = row.weeks
+            keyword.demand_reason = row.reason
+    stats.ranked = len(rows)
+    stats.anchor = anchor if rows else None
+    if stats.truncated_by_budget:
+        context.warnings.append(
+            f"Demand subset was truncated by {guard.exhausted_reason()} budget."
+        )
+    missing = [row for row in rows if row.relative_demand is None]
+    if missing:
+        context.warnings.append(
+            f"Demand unavailable for {len(missing)} of {len(rows)} ranked keywords: "
+            f"{missing[0].reason}"
+        )
+    return stats
+
+
+async def _research_data(
     context: ScenarioContext,
     *,
     scenario: str,
     input_value: str,
+    demand_seed: str | None,
     keywords: list[ResearchKeyword],
     used: set[str],
     expansion: ExpansionStats | None = None,
@@ -353,10 +461,15 @@ def _research_data(
     details: dict[str, str] | None = None,
 ) -> ResearchData:
     relevance_fallback = _sort_keywords(keywords)
+    demand_stats = await _enrich_demand(context, keywords, demand_seed, used)
     stopped_by = context.budget_guard.exhausted_reason()
-    if expansion is not None and expansion.stopped_by is not None:
+    if (
+        expansion is not None
+        and expansion.stopped_by is not None
+        and not (demand_stats is not None and demand_stats.truncated_by_budget)
+    ):
         stopped_by = _EXPANSION_STOP_TO_BUDGET.get(expansion.stopped_by, stopped_by)
-    return ResearchData(
+    data = ResearchData(
         scenario=scenario,
         input=input_value,
         language=context.market.language,
@@ -366,6 +479,7 @@ def _research_data(
         opportunities=[] if opportunities is None else opportunities,
         stats=ResearchStats(
             expansion=expansion,
+            demand=demand_stats,
             spend=context.budget_guard.spend.model_copy(deep=True),
             stopped_by=stopped_by,
         ),
@@ -377,6 +491,20 @@ def _research_data(
             details=details,
         ),
     )
+
+    if demand_stats is not None:
+        data.data_quality.caveats.extend(dict.fromkeys(context.demand_notices))
+        data.data_quality.relative_metrics.append("demand_relative")
+        data.data_quality.caveats.extend(
+            [
+                "Demand values are relative to the candidate anchor (=100), not search volumes.",
+                "Much weaker keywords can fall below the anchor's resolution; "
+                "stitching error accumulates across batches.",
+                f"Demand numbers require coverage >= {context.settings.demand_min_coverage}; "
+                "the anchor is exempt. An unranked keyword has demand_status=null.",
+            ]
+        )
+    return data
 
 
 class NewNicheResearch:
@@ -443,10 +571,11 @@ class NewNicheResearch:
         )
         await _enrich_ads(context, keywords, selected, used)
         trends = await _fetch_trends(context, self.seed, used)
-        return _research_data(
+        return await _research_data(
             context,
             scenario="niche",
             input_value=self.seed,
+            demand_seed=self.seed,
             keywords=keywords,
             used=used,
             expansion=expansion,
@@ -589,10 +718,11 @@ class CompetitorResearch:
             else self.seed_keyword
         )
         trends = await _fetch_trends(context, notable, used)
-        return _research_data(
+        return await _research_data(
             context,
             scenario="competitor",
             input_value=self.target,
+            demand_seed=notable,
             keywords=keywords,
             used=used,
             expansion=expansion,
@@ -689,10 +819,11 @@ class ExistingSiteResearch:
             else None
         )
         trends = await _fetch_trends(context, frequent, used)
-        return _research_data(
+        return await _research_data(
             context,
             scenario="site",
             input_value=self.site_url,
+            demand_seed=frequent,
             keywords=keywords,
             used=used,
             trends=trends,

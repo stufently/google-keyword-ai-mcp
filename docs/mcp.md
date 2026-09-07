@@ -73,6 +73,26 @@ makes the five run-scoped tools reachable over MCP at all: they are addressed by
 mirror of `gkai run list|show|export|resume|rerun` — the run id travels in the
 envelope of the research call that created it.
 
+`research_keywords` also accepts `demand: bool = False` and
+`demand_anchor: str | None = None`. An explicit anchor implies demand. All three
+scenarios rank a budget-limited subset after sorting, exclude the normalized
+single-key Trends seed, and choose the top remaining candidate as the default
+anchor. An explicit anchor absent from those candidates produces an `empty`
+envelope. The same parameters on `plan_research` include the optional stage and
+call estimate, without fetching or validating candidate membership. No tools
+are added; both functions remain synchronous.
+
+Research rows always contain nullable `demand_relative`, `demand_status`,
+`demand_measured_weeks`, `demand_weeks`, and `demand_reason`. A `null` status
+means the keyword was not ranked in this run, not a sixth status. Ranked keys
+use `measured`, `low_coverage`, `below_resolution`, `anchor_collapsed`, or
+`batch_failed`. `stats.demand` is `null` when disabled; otherwise it contains
+`anchor`, `requested`, `ranked`, `batches`, and `truncated_by_budget`.
+Budget truncation and missing demand numbers in ranked rows make research
+`partial`. Demand options survive saved-run replay. See
+[pipeline integration](pipeline.md#optional-relative-demand) for the selection
+rule, experiment, budget accounting, and status semantics.
+
 An empty answer is still an answer, and so is a refused one. A run that does
 not exist, and a request the server refuses — a limit that is not positive, an
 unusable date range, an unknown scenario — both come back as the ordinary
