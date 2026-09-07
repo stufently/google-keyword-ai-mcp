@@ -541,6 +541,37 @@ def test_ads_ideas_cli_forwards_seed_options(
     assert captured["limit"] == 1
 
 
+def test_ads_ideas_cli_keeps_adult_keywords_out_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The flag is opt-in, and only a call that omits it can prove that.
+
+    Every other test here passes `--include-adult` explicitly, so the default
+    itself is never exercised: flipping it to `True` in the signature leaves the
+    whole suite green while adult keywords quietly enter every ideas request.
+    """
+    settings = Settings(data_dir=tmp_path / "ads-ideas-default")
+    captured: dict[str, object] = {}
+
+    def fake_run_ads_ideas(
+        active_settings: Settings,
+        keywords: list[str] | None,
+        **kwargs: object,
+    ) -> Envelope[AdsData]:
+        captured["keywords"] = keywords
+        captured.update(kwargs)
+        return _ads_envelope("keyword_and_url_seed")
+
+    monkeypatch.setattr(cli_main, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli_main, "run_ads_ideas", fake_run_ads_ideas)
+
+    result = CliRunner().invoke(cli_main.app, ["ads", "ideas", "seed"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["keywords"] == ["seed"]
+    assert captured["include_adult"] is False
+
+
 def test_ads_historical_cli_forwards_keywords(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

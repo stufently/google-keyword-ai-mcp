@@ -246,6 +246,27 @@ def test_budget_truncation_is_partial_and_named(settings: Settings) -> None:
     assert "max_trends_calls" in (envelope.completeness_reason or "")
 
 
+def test_exactly_one_remaining_batch_is_the_budget_boundary(settings: Settings) -> None:
+    """One batch left is the boundary the "less than" comparison actually guards.
+
+    The default budget leaves two batches, so a test written against it passes
+    just as well when the loop stops one batch early or one batch late. Only an
+    input where exactly one batch fits pins the comparison down, and only
+    equality does: `ranked <= 9` would hold for any smaller number too.
+    """
+    data, context, trends = anyio.run(partial(niche, settings, calls=2))
+    assert trends.calls[0] == ["seed"]
+    assert len(trends.calls) == 2
+    assert data.stats.demand is not None
+    assert data.stats.demand.batches == 1
+    assert data.stats.demand.ranked == 5
+    assert data.stats.demand.requested == 12
+    assert data.stats.demand.truncated_by_budget is True
+    envelope = _envelope_for_research(data, context.warnings, context.errors)
+    assert envelope.completeness is Completeness.PARTIAL
+    assert "max_trends_calls" in (envelope.completeness_reason or "")
+
+
 def test_zero_remaining_batches_are_reported(settings: Settings) -> None:
     data, context, trends = anyio.run(partial(niche, settings, calls=1))
     assert trends.calls == [["seed"]]
