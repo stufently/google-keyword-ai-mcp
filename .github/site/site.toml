@@ -1,0 +1,51 @@
+# Site config for .github/site/build.py. Everything else comes from README.md.
+name = "Google Keyword Intelligence"
+title = "Google Keyword Intelligence — keyword research MCP and CLI"
+headline = "CLI and MCP server for Google Ads Keyword Planner, Autocomplete, Trends and Search Console"
+description = "Open-source CLI, MCP server and Claude skill that collects and analyzes Google search demand: Keyword Planner, Autocomplete, Trends, Search Console."
+lang = "en"
+keywords = ["google keyword research", "mcp server", "keyword planner", "google autocomplete", "google trends", "search console", "claude code", "seo"]
+license = "MIT"
+license_url = "https://opensource.org/license/mit"
+category = "DeveloperApplication"
+os = "Linux, macOS, Windows"
+programming_language = "Python"
+eyebrow = "Open source · MIT · Python 3.12+"
+download_url = "https://github.com/stufently/google-keyword-ai-mcp"
+
+landing_sections = ["Quick start", "MCP server and Claude Code", "Limitations"]
+
+pages = []
+
+features = [
+  "Expands long-tail ideas from Google Autocomplete and researches niches and competitor-derived themes.",
+  "Optional Google Ads Keyword Planner metrics and Search Console opportunities with your own credentials.",
+  "Dry runs with provider-call estimates before the real request; saved runs can be resumed and exported.",
+  "Transparent 0–100 keyword scores, deterministic lexical clusters and Markdown reports.",
+  "MCP server with 15 tools; CLI and MCP return the same versioned response envelope.",
+  "Claude Code skill that starts with gkai doctor and requires a dry run before expensive research.",
+]
+
+[[faq]]
+q = "How do I install Google Keyword Intelligence?"
+a = "It needs Python 3.12 or newer and uv. Clone the repository, run uv sync, then uv run gkai doctor --format json. Add uv sync --extra ads or --extra gsc for the optional Google Ads and Search Console clients."
+
+[[faq]]
+q = "Do I need Google credentials to use it?"
+a = "No for Autocomplete and Trends, which work without account credentials. Google Ads requires your own developer token, customer ID and OAuth client values, and Search Console requires your own service-account or authorized-user credential file."
+
+[[faq]]
+q = "How do I connect it to Claude Code?"
+a = "Add a project .mcp.json with a stdio server named google-keyword-ai that runs uv run google-keyword-ai, and start Claude Code from the repository so uv resolves the project."
+
+[[faq]]
+q = "Does competitor research show the keywords a competitor ranks for?"
+a = "No. A site seed returns ideas Google Ads associates with that site. It does not reveal queries the competitor ranks for, organic positions or traffic."
+
+[[faq]]
+q = "Are Trends values search volumes?"
+a = "No. Trends values are relative 0–100 interest within one response. Autocomplete and Trends use unofficial Google endpoints with no availability or compatibility guarantee."
+
+[[faq]]
+q = "Is this an official Google tool?"
+a = "No. The project is not affiliated with or endorsed by Google, and it is released under the MIT license."
