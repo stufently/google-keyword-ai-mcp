@@ -10,3 +10,4 @@ build/
 .uv-cache/
 .uv-cache-312/
 .coverage
+_site/
