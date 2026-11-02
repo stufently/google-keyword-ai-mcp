@@ -10,8 +10,11 @@
 ### Безопасность
 
 - `uv.lock`: certifi 2026.7.22 → 2026.10.23 (Critical GHSA-6q48-6c7w-9gw2),
-  pyasn1 0.6.4 → 0.6.5, urllib3 2.7.0 → 2.8.0 (High). oauthlib 3.3.1 оставлен:
-  исправление только в мажоре 4.0, поднимать отдельной задачей.
+  pyasn1 0.6.4 → 0.6.5, urllib3 2.7.0 → 2.8.0 (High).
+- `uv.lock`: oauthlib 3.3.1 → 4.0.1 (транзитивно через google-auth-oauthlib →
+  requests-oauthlib; CVE-2026-49264/49265/49272/118669). Ломающие изменения
+  мажора — только в серверной части OAuth2 (provider), клиентский путь не задет.
+  В `[tool.uv]` добавлен `constraint-dependencies = ["oauthlib>=4.0.1"]`.
 
 ### Изменено
 

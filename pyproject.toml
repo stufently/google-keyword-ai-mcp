@@ -71,3 +71,9 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 python_version = "3.12"
 strict = true
 files = ["src", "tests"]
+
+[tool.uv]
+# oauthlib comes in transitively via google-auth-oauthlib -> requests-oauthlib.
+# 4.0.0 fixes CVE-2026-49264/49265/49272/118669 (provider-side only; we use it
+# as a client). Keep the lock from sliding back to 3.x.
+constraint-dependencies = ["oauthlib>=4.0.1"]
